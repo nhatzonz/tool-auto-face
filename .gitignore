@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python virtual env
+.venv/
+venv/
+__pycache__/
+
+# Dữ liệu nhạy cảm / riêng tư
+fb_auth_state.json
+posted_log.json
+
+# Ảnh phòng trọ
+anh_phong/
