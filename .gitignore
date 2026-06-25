@@ -7,8 +7,13 @@ venv/
 __pycache__/
 
 # Dữ liệu nhạy cảm / riêng tư
-fb_auth_state.json
+fb_auth_state*.json
+fb_sessions/
 posted_log.json
+
+# File Excel dữ liệu phòng (và file tạm ~$ của Office)
+*.xlsx
+~$*.xlsx
 
 # Ảnh phòng trọ
 anh_phong/

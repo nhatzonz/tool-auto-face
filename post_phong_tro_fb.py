@@ -2,6 +2,7 @@
 Script đăng bài cho thuê phòng trọ lên group Facebook theo khu vực.
 Mỗi phòng đăng đúng 1 bài lên group tương ứng với khu vực của nó.
 Dữ liệu phòng từ file Excel, ảnh từ thư mục images.
+# source .venv/bin/activate
 # python post_phong_tro_fb.py
 ⚠️ LƯU Ý:
 - Facebook chống automation, tài khoản có thể bị checkpoint/khóa.
@@ -23,7 +24,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 EXCEL_PATH = os.path.join(BASE_DIR, "phong_tro.xlsx")
 IMAGES_DIR = os.path.join(BASE_DIR, "anh_phong")
-AUTH_STATE = os.path.join(BASE_DIR, "fb_auth_state.json")
+
+# Hỗ trợ lưu nhiều tài khoản Facebook cùng lúc, mỗi acc 1 file session riêng.
+# Các session mới được lưu trong thư mục fb_sessions/<tên acc>.json
+# File cũ "fb_auth_state.json" (nếu có) vẫn được nhận diện như 1 acc mặc định.
+SESSIONS_DIR = os.path.join(BASE_DIR, "fb_sessions")
+LEGACY_AUTH_STATE = os.path.join(BASE_DIR, "fb_auth_state.json")
 
 # Mapping khu vực → danh sách link group Facebook
 # Mỗi khu vực có thể có NHIỀU group, phòng sẽ được đăng lên TẤT CẢ group của khu vực đó
@@ -34,7 +40,8 @@ KHU_VUC_GROUPS = {
         "https://web.facebook.com/groups/835892593690478/",
         "https://web.facebook.com/groups/3555475404499952/",
         "https://web.facebook.com/groups/1041520932684656/",
-        "https://web.facebook.com/groups/1589501227985413/"
+        "https://web.facebook.com/groups/1589501227985413/",
+        "https://web.facebook.com/groups/631650078775924"
     ],
     "Thanh Xuân": [
         "https://web.facebook.com/groups/nhatrodongdathanhxuan/",
@@ -71,7 +78,10 @@ KHU_VUC_GROUPS = {
         "https://web.facebook.com/groups/2148539488498466/",
         "https://web.facebook.com/groups/1542856739594335/"
     ],
-    "Nam từ liêm": [
+    "Ba Đình": [
+        "https://web.facebook.com/groups/phongtrobadinh.giatot/",
+        "https://web.facebook.com/groups/757259302549445/",
+        
     ],
     "Hai Bà Trưng" : [
         "https://web.facebook.com/groups/1747492728936509/",
@@ -220,8 +230,8 @@ def get_group_urls(khu_vuc):
 
 # ======================== ĐĂNG NHẬP ========================
 
-def login_facebook(p):
-    """Đăng nhập Facebook thủ công, lưu auth state."""
+def login_facebook(p, auth_state):
+    """Đăng nhập Facebook thủ công, lưu auth state vào đường dẫn `auth_state`."""
     print("Mở trình duyệt để đăng nhập Facebook...")
     print("Hãy đăng nhập thủ công, sau đó nhấn Enter trong terminal.")
 
@@ -235,9 +245,90 @@ def login_facebook(p):
 
     input("\n>>> Đã đăng nhập xong? Nhấn Enter để lưu session... ")
 
-    context.storage_state(path=AUTH_STATE)
-    print(f"Đã lưu session vào {AUTH_STATE}")
+    context.storage_state(path=auth_state)
+    print(f"Đã lưu session vào {auth_state}")
     browser.close()
+
+
+def list_sessions():
+    """Liệt kê các session đã lưu. Trả về list (tên hiển thị, đường dẫn file)."""
+    sessions = []
+    # File cũ (nếu có) coi như 1 acc mặc định
+    if os.path.exists(LEGACY_AUTH_STATE):
+        sessions.append(("Tài khoản mặc định (fb_auth_state)", LEGACY_AUTH_STATE))
+    # Các acc trong thư mục fb_sessions/
+    if os.path.isdir(SESSIONS_DIR):
+        for f in sorted(os.listdir(SESSIONS_DIR)):
+            if f.endswith(".json"):
+                sessions.append((f[:-5], os.path.join(SESSIONS_DIR, f)))
+    return sessions
+
+
+def sanitize_account_name(name):
+    """Chuẩn hóa tên acc thành tên file an toàn (bỏ ký tự đặc biệt)."""
+    name = name.strip()
+    name = re.sub(r"[^\w\-. ]", "", name, flags=re.UNICODE)
+    name = name.strip().replace(" ", "_")
+    return name
+
+
+def login_new_account():
+    """Đăng nhập tài khoản mới và lưu session vào fb_sessions/<tên>.json. Trả về đường dẫn."""
+    while True:
+        name = input("\n>>> Đặt tên cho tài khoản mới (vd: acc_chinh): ").strip()
+        safe = sanitize_account_name(name)
+        if not safe:
+            print("  ⚠ Tên không hợp lệ, nhập lại.")
+            continue
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
+        path = os.path.join(SESSIONS_DIR, f"{safe}.json")
+        if os.path.exists(path):
+            ow = input(f"  Acc '{safe}' đã tồn tại. Ghi đè? (y/n): ").strip().lower()
+            if ow != "y":
+                continue
+        break
+
+    with sync_playwright() as p:
+        login_facebook(p, path)
+    return path
+
+
+def choose_account():
+    """Menu chọn tài khoản đăng bài. Trả về đường dẫn file session.
+
+    [1] Dùng tài khoản đã đăng nhập → chọn từ danh sách session đã lưu
+    [2] Đăng nhập tài khoản mới → đăng nhập rồi lưu state cho acc mới
+    """
+    while True:
+        print()
+        log(f"{'=' * 60}")
+        log("CHỌN TÀI KHOẢN ĐĂNG BÀI")
+        print("   [1] Dùng tài khoản đã đăng nhập")
+        print("   [2] Đăng nhập tài khoản mới")
+        log(f"{'=' * 60}")
+
+        choice = input("\n>>> Chọn (1/2): ").strip()
+
+        if choice == "1":
+            sessions = list_sessions()
+            if not sessions:
+                print("  ⚠ Chưa có tài khoản nào được lưu. Hãy chọn [2] để đăng nhập mới.")
+                continue
+            print("\n  Danh sách tài khoản đã đăng nhập:")
+            for idx, (name, _) in enumerate(sessions, start=1):
+                print(f"   [{idx}] {name}")
+            sel = input(f"\n>>> Chọn tài khoản (1-{len(sessions)}): ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(sessions):
+                name, path = sessions[int(sel) - 1]
+                log(f"Đã chọn: {name}")
+                return path
+            print("  ⚠ Lựa chọn không hợp lệ.")
+            continue
+
+        if choice == "2":
+            return login_new_account()
+
+        print("  ⚠ Lựa chọn không hợp lệ. Nhập 1 hoặc 2.")
 
 
 # ======================== ĐĂNG BÀI LÊN 1 GROUP ========================
@@ -526,11 +617,8 @@ def main():
     log(f"Sẽ đăng {len(batch)} phòng → ~{total_posts} bài (theo thứ tự STT)")
     log(f"{'=' * 60}")
 
-    if not os.path.exists(AUTH_STATE):
-        log("Chưa có session Facebook. Cần đăng nhập trước.")
-        with sync_playwright() as p:
-            login_facebook(p)
-        print()
+    # Chọn tài khoản Facebook để đăng bài (acc đã login hoặc đăng nhập mới)
+    auth_state = choose_account()
 
     posted = load_posted_log()
     ok = 0
@@ -542,7 +630,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, slow_mo=150)
         context = browser.new_context(
-            storage_state=AUTH_STATE,
+            storage_state=auth_state,
             viewport={"width": 1280, "height": 900},
             locale="vi-VN",
         )
@@ -558,19 +646,19 @@ def main():
             log(f"Đang đăng nhập với nick: {profile_name}")
             confirm = input(f"\n>>> Đúng nick '{profile_name}'? Nhấn Enter để tiếp tục, gõ 'q' để hủy: ").strip()
             if confirm.lower() == 'q':
-                log("Đã hủy. Xóa fb_auth_state.json rồi chạy lại nếu muốn đổi nick.")
+                log(f"Đã hủy. Xóa {os.path.basename(auth_state)} rồi chạy lại nếu muốn đổi nick.")
                 browser.close()
                 return
         except Exception:
             log("⚠ Session hết hạn. Xóa session cũ và mở lại để đăng nhập...")
             browser.close()
-            os.remove(AUTH_STATE)
+            os.remove(auth_state)
             # Mở trình duyệt mới để đăng nhập lại
-            login_facebook(p)
+            login_facebook(p, auth_state)
             # Khởi tạo lại browser với session mới
             browser = p.chromium.launch(headless=False, slow_mo=150)
             context = browser.new_context(
-                storage_state=AUTH_STATE,
+                storage_state=auth_state,
                 viewport={"width": 1280, "height": 900},
                 locale="vi-VN",
             )
@@ -634,7 +722,7 @@ def main():
                 countdown(delay, "Phòng tiếp: ")
 
         # Lưu lại session
-        context.storage_state(path=AUTH_STATE)
+        context.storage_state(path=auth_state)
         browser.close()
 
     print()
