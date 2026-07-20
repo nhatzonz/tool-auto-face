@@ -14,7 +14,11 @@ vực, với tuyển dụng có thể là ngành nghề, với seeding là chủ
 import os
 import json
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import paths
+
+# Dữ liệu người dùng nằm cạnh file .exe (hoặc cạnh mã nguồn khi chạy bằng
+# python), không nằm trong thư mục tạm của PyInstaller — xem paths.py.
+BASE_DIR = paths.DATA_DIR
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # Giá trị mặc định cho một chiến dịch mới tạo
@@ -43,70 +47,14 @@ DEFAULT_CONFIG = {
             "delay_between_groups": 10,
             "delay_between_rooms": 10,
             "max_retries": 2,
+            # Dữ liệu mẫu để người dùng thấy ngay cấu trúc: mỗi phân loại là
+            # một danh sách link group. Tự thêm/sửa/xóa trong tab "Nhóm theo
+            # phân loại" của giao diện.
             "groups": {
-                "Hà Đông": [
-                    "https://web.facebook.com/groups/phongtro.hanoi.hadong/",
-                    "https://web.facebook.com/groups/835892593690478/",
-                    "https://web.facebook.com/groups/3555475404499952/",
-                    "https://web.facebook.com/groups/1041520932684656/",
-                    "https://web.facebook.com/groups/1589501227985413/",
-                    "https://web.facebook.com/groups/631650078775924",
+                "Khu vực mẫu 1": [
+                    "https://web.facebook.com/groups/dan-link-group-cua-ban",
                 ],
-                "Thanh Xuân": [
-                    "https://web.facebook.com/groups/nhatrodongdathanhxuan/",
-                    "https://web.facebook.com/groups/176362986942358/",
-                    "https://web.facebook.com/groups/605109991280427/",
-                    "https://web.facebook.com/groups/908726406847516/",
-                    "https://web.facebook.com/groups/timphongtrodongdangatusothanhxuanhanoi/",
-                    "https://web.facebook.com/groups/1385595868491454/",
-                ],
-                "Bắc từ liêm": [
-                    "https://web.facebook.com/groups/2012063565703273/",
-                    "https://web.facebook.com/groups/1069950844149062/",
-                ],
-                "Cầu Giấy": [
-                    "https://web.facebook.com/groups/142775226671894/",
-                    "https://web.facebook.com/groups/702443907550431/",
-                    "https://web.facebook.com/groups/370974904259405/",
-                    "https://web.facebook.com/groups/1041097177406107/",
-                    "https://web.facebook.com/groups/6104634336285691/",
-                    "https://web.facebook.com/groups/nhatrometrimydinhcaugiay/",
-                    "https://web.facebook.com/groups/phongtrocaugiayhn/",
-                    "https://web.facebook.com/groups/140397885361011/",
-                    "https://web.facebook.com/groups/2237019069763450/",
-                    "https://web.facebook.com/groups/2202922693407349/",
-                ],
-                "Mỹ Đình": [
-                    "https://web.facebook.com/groups/1914388365626022/",
-                    "https://web.facebook.com/groups/2237019069763450/",
-                    "https://web.facebook.com/groups/phongtrocaugiaymydinhmetri/",
-                    "https://web.facebook.com/groups/507104870413526/",
-                    "https://web.facebook.com/groups/2148539488498466/",
-                    "https://web.facebook.com/groups/1542856739594335/",
-                ],
-                "Ba Đình": [
-                    "https://web.facebook.com/groups/phongtrobadinh.giatot/",
-                    "https://web.facebook.com/groups/757259302549445/",
-                ],
-                "Hai Bà Trưng": [
-                    "https://web.facebook.com/groups/1747492728936509/",
-                    "https://web.facebook.com/groups/494231151747853/",
-                    "https://web.facebook.com/groups/724565062266526/",
-                    "https://web.facebook.com/groups/647543593374506/",
-                    "https://web.facebook.com/groups/2790717834511802/",
-                ],
-                "Hoàng Mai": [
-                    "https://web.facebook.com/groups/649420490421652/",
-                    "https://web.facebook.com/groups/900402601097250/",
-                    "https://web.facebook.com/groups/583641796650849/",
-                    "https://web.facebook.com/groups/778767189186540/",
-                ],
-                "Thanh Trì": [
-                    "https://web.facebook.com/groups/1145700312817923/",
-                    "https://web.facebook.com/groups/964760639021647/",
-                    "https://web.facebook.com/groups/TimPhongTroThanhTri/",
-                    "https://web.facebook.com/groups/1620926588466366/",
-                ],
+                "Khu vực mẫu 2": [],
             },
         }
     },

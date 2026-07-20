@@ -1,0 +1,5 @@
+playwright==1.61.0
+openpyxl==3.1.5
+
+# Chỉ cần khi đóng gói thành .exe (không cần để chạy tool)
+pyinstaller==6.11.1

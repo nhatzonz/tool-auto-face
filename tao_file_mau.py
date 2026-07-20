@@ -14,7 +14,9 @@ import sys
 import openpyxl
 from openpyxl.styles import Font, Alignment
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import paths
+
+BASE_DIR = paths.DATA_DIR
 
 HEADER = ["STT", "Noi dung bai (Caption Facebook)", "Phan loai", "Folder anh"]
 WIDTHS = {"A": 8, "B": 60, "C": 25, "D": 20}

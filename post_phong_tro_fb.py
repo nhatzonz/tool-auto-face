@@ -23,10 +23,15 @@ import openpyxl
 from playwright.sync_api import sync_playwright
 
 import config as cfg_module
+import paths
+
+# Trỏ Playwright vào Chromium đóng kèm (chỉ có tác dụng khi chạy từ .exe)
+paths.setup_playwright_env()
 
 # ======================== CẤU HÌNH ========================
-# Tự detect thư mục chứa script (hoạt động trên cả Mac và Windows)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Thư mục dữ liệu người dùng — chạy đúng trên Mac, Windows, và cả khi đã đóng
+# gói thành .exe (khi đó là thư mục chứa file .exe). Xem paths.py.
+BASE_DIR = paths.DATA_DIR
 
 # Toàn bộ cấu hình đọc từ config.json (sửa được bằng giao diện: python gui.py).
 # Các biến dưới đây được reload_config() gán lại theo chiến dịch đang chọn.

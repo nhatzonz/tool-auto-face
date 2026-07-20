@@ -1,0 +1,47 @@
+name: Build app Windows
+
+# Chạy tay từ tab Actions trên GitHub, hoặc tự chạy khi đẩy tag dạng v1.0
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    # Bắt buộc chạy trên Windows: PyInstaller không build chéo hệ điều hành,
+    # build trên máy Mac/Linux chỉ ra file chạy cho Mac/Linux.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Cài thư viện
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tải Chromium vào trong package playwright
+        # PLAYWRIGHT_BROWSERS_PATH=0 để Chromium nằm trong package, nhờ đó
+        # PyInstaller đóng kèm được — xem giải thích trong build_windows.spec
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+        run: playwright install chromium
+
+      - name: Đóng gói
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+        run: pyinstaller build_windows.spec
+
+      - name: Kèm hướng dẫn sử dụng vào thư mục kết quả
+        run: copy HUONGDAN_NGUOI_DUNG.md dist\ToolDangBaiFacebook\
+
+      - name: Tải kết quả lên
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToolDangBaiFacebook-Windows
+          path: dist/ToolDangBaiFacebook/

@@ -25,6 +25,7 @@ import openpyxl
 
 import config as cfg_module
 import post_phong_tro_fb as bot
+import tao_file_mau
 
 
 class App(tk.Tk):
@@ -61,11 +62,31 @@ class App(tk.Tk):
         self._build_paths_tab()
         self._build_groups_tab()
 
+        self._tao_du_lieu_mau_lan_dau()
         self.load_campaign_into_views()
         self.refresh_accounts()
         self.after(100, self._drain_log_queue)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(50, self._hich_ve_lai)
+
+    def _tao_du_lieu_mau_lan_dau(self):
+        """Lần chạy đầu trên máy mới thì chưa có file Excel nào — tạo sẵn file
+        mẫu và thư mục ảnh cho chiến dịch đang chọn.
+
+        Không có bước này, người dùng mở bản .exe lên sẽ chỉ thấy dòng "⚠ Chưa
+        có file" mà không biết phải tạo file thế nào, đúng cột nào.
+        """
+        camp = self.campaign()
+        excel = camp.get("excel_path")
+        if excel and not os.path.exists(excel):
+            try:
+                tao_file_mau.tao_file(excel, camp.get("sheet_name") or "Sheet1")
+            except Exception as e:
+                self.log_queue.put(f"Không tạo được file Excel mẫu: {e}")
+
+        for d in (camp.get("images_dir"), self.cfg.get("profiles_dir")):
+            if d:
+                os.makedirs(d, exist_ok=True)
 
     def _hich_ve_lai(self):
         """Tk 8.5.9 (bản Apple kèm sẵn) hay vẽ ra cửa sổ trắng trơn trên macOS

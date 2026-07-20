@@ -18,3 +18,12 @@ posted_log*.json
 
 # Ảnh phòng trọ
 anh_phong/
+
+# Cấu hình riêng của từng máy (đường dẫn, danh sách group).
+# Tool tự sinh file này lúc chạy lần đầu từ mẫu trong config.py.
+config.json
+config.json.tmp
+
+# Kết quả đóng gói PyInstaller
+build/
+dist/
