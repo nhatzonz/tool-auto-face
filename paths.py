@@ -37,12 +37,15 @@ def bundle_path(*parts):
 def setup_playwright_env():
     """Trỏ Playwright vào Chromium đóng kèm trong gói.
 
-    Lúc build, Chromium được cài với PLAYWRIGHT_BROWSERS_PATH=0 nên nó nằm ngay
-    trong thư mục package playwright thay vì cache riêng của máy. Đặt lại đúng
-    biến môi trường đó khi chạy để Playwright tìm thấy trình duyệt đã đóng kèm,
-    thay vì đi tải mới về (máy người dùng không có, và có thể không có mạng).
+    Máy người dùng không có Chromium trong cache và có thể không có mạng để
+    tải, nên phải chỉ rõ trình duyệt nằm ngay trong gói (thư mục ms-playwright,
+    do build_windows.spec đóng kèm).
     """
-    if getattr(sys, "frozen", False):
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
-        # Bỏ qua kiểm tra phiên bản driver — thư mục gói là chỉ đọc
-        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+    if not getattr(sys, "frozen", False):
+        return          # chạy từ mã nguồn: dùng cache Playwright bình thường
+
+    browsers = bundle_path("ms-playwright")
+    if os.path.isdir(browsers):
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", browsers)
+    # Thư mục gói là chỉ đọc, có tải cũng không ghi được vào đó
+    os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")

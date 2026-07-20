@@ -29,17 +29,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Tải Chromium vào trong package playwright
-        # PLAYWRIGHT_BROWSERS_PATH=0 để Chromium nằm trong package, nhờ đó
-        # PyInstaller đóng kèm được — xem giải thích trong build_windows.spec
+      - name: Tải Chromium vào thư mục ms-playwright trong project
+        # Để ngay trong project thì PyInstaller mới đóng kèm được — xem giải
+        # thích trong build_windows.spec
         env:
-          PLAYWRIGHT_BROWSERS_PATH: "0"
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\ms-playwright
         run: playwright install chromium
 
       - name: Đóng gói
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: "0"
         run: pyinstaller build_windows.spec
+
+      - name: Kiểm tra Chromium đã nằm trong gói
+        # Không có bước này, gói thiếu trình duyệt vẫn build xanh bình thường
+        # và chỉ lộ ra khi người dùng bấm "Thêm nick" rồi báo lỗi.
+        shell: pwsh
+        run: |
+          $dist = "dist\ToolDangBaiFacebook"
+          $exe = Get-ChildItem -Path $dist -Recurse -Filter "chrome.exe" -ErrorAction SilentlyContinue
+          if (-not $exe) {
+            Write-Error "Không tìm thấy chrome.exe trong gói — Chromium chưa được đóng kèm."
+            exit 1
+          }
+          $mb = [math]::Round((Get-ChildItem $dist -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+          Write-Host "OK: chrome.exe co trong goi. Tong dung luong: $mb MB"
+          if ($mb -lt 150) {
+            Write-Error "Goi chi $mb MB, nho bat thuong — nhieu kha nang van thieu file."
+            exit 1
+          }
 
       - name: Kèm hướng dẫn sử dụng vào thư mục kết quả
         run: copy HUONGDAN_NGUOI_DUNG.md dist\ToolDangBaiFacebook\
