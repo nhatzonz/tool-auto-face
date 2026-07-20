@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 import config as cfg_module
 import paths
 
-# Trỏ Playwright vào Chromium đóng kèm (chỉ có tác dụng khi chạy từ .exe)
+# Chuẩn bị môi trường cho bản đóng gói (không tác dụng gì khi chạy mã nguồn)
 paths.setup_playwright_env()
 
 # ======================== CẤU HÌNH ========================

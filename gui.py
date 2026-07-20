@@ -23,6 +23,11 @@ from tkinter import ttk, filedialog, messagebox
 
 import openpyxl
 
+import paths
+
+# Phải gọi trước khi import các module có print() ở cấp module
+paths.guard_missing_stdout()
+
 import config as cfg_module
 import post_phong_tro_fb as bot
 import tao_file_mau
