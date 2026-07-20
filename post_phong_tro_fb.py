@@ -338,15 +338,27 @@ def open_profile(p, profile_dir, slow_mo=150):
     Cookie lưu thẳng trong profile nên không cần storage_state.
     """
     os.makedirs(profile_dir, exist_ok=True)
-    context = p.chromium.launch_persistent_context(
-        profile_dir,
-        channel="chrome",
-        headless=False,
-        slow_mo=slow_mo,
-        viewport={"width": 1280, "height": 900},
-        locale="vi-VN",
-        args=["--disable-blink-features=AutomationControlled"],
-    )
+    try:
+        context = p.chromium.launch_persistent_context(
+            profile_dir,
+            channel="chrome",
+            headless=False,
+            slow_mo=slow_mo,
+            viewport={"width": 1280, "height": 900},
+            locale="vi-VN",
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+    except Exception as e:
+        # Máy chưa cài Chrome là nguyên nhân thường gặp nhất, nhưng Playwright
+        # chỉ báo một dòng tiếng Anh về "channel chrome" mà người dùng không
+        # hiểu phải làm gì. Dịch sang hướng dẫn cụ thể.
+        if "chrome" in str(e).lower() and "executable" in str(e).lower():
+            raise RuntimeError(
+                "Không tìm thấy Google Chrome trên máy này.\n\n"
+                "Tool cần Chrome thật để đăng nhập Facebook. Hãy tải và cài "
+                "Chrome tại https://www.google.com/chrome rồi mở lại tool."
+            ) from e
+        raise
     return context
 
 

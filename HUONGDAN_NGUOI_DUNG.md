@@ -7,6 +7,19 @@ không cần cài trình duyệt, không cần biết lập trình.
 
 ## 1. Cài đặt
 
+### Cần có sẵn: Google Chrome
+
+Máy phải cài **Google Chrome**. Tool điều khiển Chrome thật để đăng bài — dùng
+trình duyệt khác hoặc trình duyệt giả lập thì Facebook chặn đăng nhập.
+
+Phần lớn máy đã có sẵn. Nếu chưa, tải tại https://www.google.com/chrome (miễn
+phí). Cài xong không cần làm gì thêm, tool tự tìm thấy.
+
+Ngoài Chrome ra thì **không cần cài gì khác** — Python và các thư viện đã nằm
+sẵn trong gói.
+
+### Chạy tool
+
 1. Giải nén file `ToolDangBaiFacebook-Windows.zip` ra một thư mục bất kỳ —
    ví dụ `D:\ToolFacebook`.
 2. Mở thư mục vừa giải nén, bấm đúp vào **`ToolDangBaiFacebook.exe`**.
@@ -127,6 +140,7 @@ Những điều quan trọng nhất, xếp theo mức ảnh hưởng:
 | Không đọc được Excel | Đang mở file đó trong Excel. Đóng lại rồi bấm nạp lại |
 | Mở tool báo nhóm không đăng được | Nick chưa vào nhóm đó, hoặc nhóm bắt duyệt bài. Kiểm tra bằng tay |
 | Bị đòi đăng nhập lại liên tục | Thư mục `fb_profiles\` bị xóa, hoặc tool đang nằm trong `C:\Program Files` (không ghi được) |
+| `Không tìm thấy Google Chrome trên máy này` | Cài Chrome tại https://www.google.com/chrome rồi mở lại tool |
 | Đăng vài bài rồi dừng, báo checkpoint | Facebook đã cảnh báo nick. **Dừng ngay**, đăng nhập bằng tay giải quyết, nghỉ vài ngày rồi tăng thời gian chờ lên |
 
 ### Chuyển tool sang máy khác

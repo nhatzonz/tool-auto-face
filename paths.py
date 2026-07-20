@@ -35,17 +35,12 @@ def bundle_path(*parts):
 
 
 def setup_playwright_env():
-    """Trỏ Playwright vào Chromium đóng kèm trong gói.
+    """Chuẩn bị môi trường Playwright cho bản đã đóng gói.
 
-    Máy người dùng không có Chromium trong cache và có thể không có mạng để
-    tải, nên phải chỉ rõ trình duyệt nằm ngay trong gói (thư mục ms-playwright,
-    do build_windows.spec đóng kèm).
+    Tool dùng Google Chrome cài sẵn trên máy (channel='chrome') chứ không dùng
+    Chromium của Playwright, nên không cần trỏ tới thư mục trình duyệt nào.
+    Chỉ cần chặn Playwright tự đi tải: thư mục gói là chỉ đọc, tải cũng không
+    ghi được, mà chờ tải xong lại làm tool đứng hình vài phút.
     """
-    if not getattr(sys, "frozen", False):
-        return          # chạy từ mã nguồn: dùng cache Playwright bình thường
-
-    browsers = bundle_path("ms-playwright")
-    if os.path.isdir(browsers):
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", browsers)
-    # Thư mục gói là chỉ đọc, có tải cũng không ghi được vào đó
-    os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+    if getattr(sys, "frozen", False):
+        os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")

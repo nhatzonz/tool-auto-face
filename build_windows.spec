@@ -4,42 +4,23 @@ Cấu hình đóng gói tool thành ứng dụng Windows bằng PyInstaller.
 
 Cách build (chạy trên máy Windows):
     pip install -r requirements.txt
-    set PLAYWRIGHT_BROWSERS_PATH=%CD%\\ms-playwright
-    playwright install chromium
     pyinstaller build_windows.spec
 
 Kết quả: thư mục dist\\ToolDangBaiFacebook\\ — đưa cả thư mục này cho người
-dùng, họ bấm vào ToolDangBaiFacebook.exe là chạy, không cần cài Python hay
-trình duyệt gì thêm.
+dùng, họ bấm vào ToolDangBaiFacebook.exe là chạy, không cần cài Python.
 
-Vì sao tải Chromium vào thư mục ms-playwright ngay trong project: mặc định
-Playwright để trình duyệt ở cache riêng của máy
-(%USERPROFILE%\\AppData\\Local\\ms-playwright), nằm ngoài project nên
-PyInstaller không thấy để đóng kèm.
+KHÔNG đóng kèm Chromium của Playwright, và đây là chủ ý: tool mở Google Chrome
+thật trên máy người dùng qua channel='chrome' (xem open_profile trong
+post_phong_tro_fb.py). Chromium của Playwright bị Facebook nhận diện là
+automation nên không đăng nhập được. Vì vậy máy người dùng cần có sẵn Chrome,
+đổi lại gói nhẹ hơn khoảng 150MB.
 
-Từng thử PLAYWRIGHT_BROWSERS_PATH=0 (đưa Chromium vào trong package playwright)
-rồi để collect_all() tự gom, nhưng KHÔNG ĂN: Chromium nằm trong thư mục con
-'.local-browsers' bắt đầu bằng dấu chấm, mà collect_all() bỏ qua thư mục ẩn.
-Build vẫn xanh nhưng gói ra thiếu trình duyệt, chỉ nặng 51MB. Nên giờ chỉ
-định thẳng đường dẫn ở dòng datas bên dưới cho chắc chắn.
+Vẫn phải gom package playwright vì nó cần driver Node.js để điều khiển Chrome.
 """
-import os
 from PyInstaller.utils.hooks import collect_all
 
 # Gom package playwright: driver Node.js và các file .js đi kèm
 pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
-
-# Đóng kèm Chromium. Dừng hẳn nếu thiếu, thay vì build ra gói hỏng mà vẫn báo
-# thành công — lỗi kiểu đó chỉ lộ ra khi đã đưa tới tay người dùng.
-BROWSERS_DIR = os.path.abspath("ms-playwright")
-if not os.path.isdir(BROWSERS_DIR):
-    raise SystemExit(
-        f"Không tìm thấy '{BROWSERS_DIR}'.\n"
-        f"Chạy 2 lệnh sau trước khi build:\n"
-        f"    set PLAYWRIGHT_BROWSERS_PATH={BROWSERS_DIR}\n"
-        f"    playwright install chromium"
-    )
-pw_datas += [(BROWSERS_DIR, "ms-playwright")]
 
 a = Analysis(
     ["gui.py"],
