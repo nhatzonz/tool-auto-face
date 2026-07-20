@@ -9,6 +9,7 @@ __pycache__/
 # Dữ liệu nhạy cảm / riêng tư
 fb_auth_state*.json
 fb_sessions/
+fb_profiles/
 posted_log.json
 
 # File Excel dữ liệu phòng (và file tạm ~$ của Office)

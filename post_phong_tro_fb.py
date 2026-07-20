@@ -25,11 +25,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_PATH = os.path.join(BASE_DIR, "phong_tro.xlsx")
 IMAGES_DIR = os.path.join(BASE_DIR, "anh_phong")
 
-# Hỗ trợ lưu nhiều tài khoản Facebook cùng lúc, mỗi acc 1 file session riêng.
-# Các session mới được lưu trong thư mục fb_sessions/<tên acc>.json
-# File cũ "fb_auth_state.json" (nếu có) vẫn được nhận diện như 1 acc mặc định.
-SESSIONS_DIR = os.path.join(BASE_DIR, "fb_sessions")
-LEGACY_AUTH_STATE = os.path.join(BASE_DIR, "fb_auth_state.json")
+# Hỗ trợ nhiều tài khoản Facebook cùng lúc: mỗi acc là 1 thư mục profile Chrome
+# thật trong fb_profiles/<tên acc>/. Cookie nằm sẵn trong profile nên không cần
+# file session JSON.
+PROFILES_DIR = os.path.join(BASE_DIR, "fb_profiles")
 
 # Mapping khu vực → danh sách link group Facebook
 # Mỗi khu vực có thể có NHIỀU group, phòng sẽ được đăng lên TẤT CẢ group của khu vực đó
@@ -230,37 +229,88 @@ def get_group_urls(khu_vuc):
 
 # ======================== ĐĂNG NHẬP ========================
 
-def login_facebook(p, auth_state):
-    """Đăng nhập Facebook thủ công, lưu auth state vào đường dẫn `auth_state`."""
-    print("Mở trình duyệt để đăng nhập Facebook...")
-    print("Hãy đăng nhập thủ công, sau đó nhấn Enter trong terminal.")
+def open_profile(p, profile_dir, slow_mo=150):
+    """Mở Chrome thật với profile bền tại `profile_dir`.
 
-    browser = p.chromium.launch(headless=False, slow_mo=200)
-    context = browser.new_context(
+    Dùng channel='chrome' (Chrome cài trên máy) thay vì Chromium đóng gói của
+    Playwright, và tắt cờ AutomationControlled — nếu không Facebook đọc được
+    navigator.webdriver và từ chối cấp session dù mật khẩu đúng.
+    Cookie lưu thẳng trong profile nên không cần storage_state.
+    """
+    os.makedirs(profile_dir, exist_ok=True)
+    context = p.chromium.launch_persistent_context(
+        profile_dir,
+        channel="chrome",
+        headless=False,
+        slow_mo=slow_mo,
         viewport={"width": 1280, "height": 900},
         locale="vi-VN",
+        args=["--disable-blink-features=AutomationControlled"],
     )
-    page = context.new_page()
-    page.goto("https://www.facebook.com/login", wait_until="networkidle")
+    return context
 
-    input("\n>>> Đã đăng nhập xong? Nhấn Enter để lưu session... ")
 
-    context.storage_state(path=auth_state)
-    print(f"Đã lưu session vào {auth_state}")
-    browser.close()
+def get_page(context):
+    """Lấy tab đầu tiên của persistent context (Chrome luôn mở sẵn 1 tab)."""
+    page = context.pages[0] if context.pages else context.new_page()
+    page.set_default_timeout(30000)
+    return page
+
+
+def login_facebook(p, profile_dir):
+    """Đăng nhập Facebook thủ công vào profile. Cookie tự lưu trong profile_dir."""
+    print("Mở Chrome để đăng nhập Facebook...")
+    print("Hãy đăng nhập thủ công, sau đó nhấn Enter trong terminal.")
+
+    context = open_profile(p, profile_dir, slow_mo=200)
+    page = get_page(context)
+    page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
+
+    input("\n>>> Đã đăng nhập xong? Nhấn Enter để tiếp tục... ")
+
+    if is_logged_in(page):
+        print(f"Đã lưu đăng nhập vào profile {profile_dir}")
+        ok = True
+    else:
+        print("⚠ Chưa đăng nhập được (vẫn ở màn login). Profile giữ nguyên, chạy lại để thử tiếp.")
+        ok = False
+    context.close()
+    return ok
+
+
+def is_logged_in(page):
+    """Session còn sống hay không. Chỉ coi là hết hạn khi Facebook đá về trang
+    login — không dựa vào việc render được tên nick, vì trang profile có thể
+    load chậm hoặc đổi layout."""
+    url = page.url.lower()
+    if "login" in url or "checkpoint" in url:
+        return False
+    if page.locator("input[name='email'], input[name='pass']").count() > 0:
+        return False
+    cookies = page.context.cookies("https://www.facebook.com")
+    return any(c["name"] == "c_user" for c in cookies)
+
+
+def get_profile_name(page):
+    """Lấy tên nick, thử vài selector. Trả về '(không đọc được tên)' nếu thất bại."""
+    for sel in ["h1", "[role='main'] h2", "title"]:
+        try:
+            name = page.locator(sel).first.inner_text(timeout=3000).strip()
+            if name and "facebook" not in name.lower():
+                return name
+        except Exception:
+            continue
+    return "(không đọc được tên)"
 
 
 def list_sessions():
-    """Liệt kê các session đã lưu. Trả về list (tên hiển thị, đường dẫn file)."""
+    """Liệt kê các profile đã đăng nhập. Trả về list (tên hiển thị, đường dẫn profile)."""
     sessions = []
-    # File cũ (nếu có) coi như 1 acc mặc định
-    if os.path.exists(LEGACY_AUTH_STATE):
-        sessions.append(("Tài khoản mặc định (fb_auth_state)", LEGACY_AUTH_STATE))
-    # Các acc trong thư mục fb_sessions/
-    if os.path.isdir(SESSIONS_DIR):
-        for f in sorted(os.listdir(SESSIONS_DIR)):
-            if f.endswith(".json"):
-                sessions.append((f[:-5], os.path.join(SESSIONS_DIR, f)))
+    if os.path.isdir(PROFILES_DIR):
+        for d in sorted(os.listdir(PROFILES_DIR)):
+            full = os.path.join(PROFILES_DIR, d)
+            if os.path.isdir(full):
+                sessions.append((d, full))
     return sessions
 
 
@@ -273,17 +323,17 @@ def sanitize_account_name(name):
 
 
 def login_new_account():
-    """Đăng nhập tài khoản mới và lưu session vào fb_sessions/<tên>.json. Trả về đường dẫn."""
+    """Đăng nhập tài khoản mới vào fb_profiles/<tên>/. Trả về đường dẫn profile."""
     while True:
         name = input("\n>>> Đặt tên cho tài khoản mới (vd: acc_chinh): ").strip()
         safe = sanitize_account_name(name)
         if not safe:
             print("  ⚠ Tên không hợp lệ, nhập lại.")
             continue
-        os.makedirs(SESSIONS_DIR, exist_ok=True)
-        path = os.path.join(SESSIONS_DIR, f"{safe}.json")
-        if os.path.exists(path):
-            ow = input(f"  Acc '{safe}' đã tồn tại. Ghi đè? (y/n): ").strip().lower()
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        path = os.path.join(PROFILES_DIR, safe)
+        if os.path.isdir(path):
+            ow = input(f"  Acc '{safe}' đã tồn tại. Dùng lại profile này? (y/n): ").strip().lower()
             if ow != "y":
                 continue
         break
@@ -618,7 +668,7 @@ def main():
     log(f"{'=' * 60}")
 
     # Chọn tài khoản Facebook để đăng bài (acc đã login hoặc đăng nhập mới)
-    auth_state = choose_account()
+    profile_dir = choose_account()
 
     posted = load_posted_log()
     ok = 0
@@ -628,42 +678,29 @@ def main():
     post_num = 0
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, slow_mo=150)
-        context = browser.new_context(
-            storage_state=auth_state,
-            viewport={"width": 1280, "height": 900},
-            locale="vi-VN",
-        )
-        page = context.new_page()
-        page.set_default_timeout(30000)
+        context = open_profile(p, profile_dir)
+        page = get_page(context)
 
         # Kiểm tra nick đang đăng nhập
         log("Đang kiểm tra tài khoản Facebook...")
         page.goto("https://www.facebook.com/me", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
-        try:
-            profile_name = page.locator("h1").first.inner_text(timeout=5000)
+        if is_logged_in(page):
+            profile_name = get_profile_name(page)
             log(f"Đang đăng nhập với nick: {profile_name}")
             confirm = input(f"\n>>> Đúng nick '{profile_name}'? Nhấn Enter để tiếp tục, gõ 'q' để hủy: ").strip()
             if confirm.lower() == 'q':
-                log(f"Đã hủy. Xóa {os.path.basename(auth_state)} rồi chạy lại nếu muốn đổi nick.")
-                browser.close()
+                log("Đã hủy. Chọn [2] khi chạy lại nếu muốn đổi nick.")
+                context.close()
                 return
-        except Exception:
-            log("⚠ Session hết hạn. Xóa session cũ và mở lại để đăng nhập...")
-            browser.close()
-            os.remove(auth_state)
-            # Mở trình duyệt mới để đăng nhập lại
-            login_facebook(p, auth_state)
-            # Khởi tạo lại browser với session mới
-            browser = p.chromium.launch(headless=False, slow_mo=150)
-            context = browser.new_context(
-                storage_state=auth_state,
-                viewport={"width": 1280, "height": 900},
-                locale="vi-VN",
-            )
-            page = context.new_page()
-            page.set_default_timeout(30000)
+        else:
+            log("⚠ Chưa đăng nhập. Mở lại để đăng nhập...")
+            context.close()
+            if not login_facebook(p, profile_dir):
+                log("Không đăng nhập được. Dừng lại.")
+                return
+            context = open_profile(p, profile_dir)
+            page = get_page(context)
 
         for i, room in enumerate(batch):
             print()
@@ -721,9 +758,8 @@ def main():
                 delay = DELAY_BETWEEN_ROOMS + random.randint(0, 5)
                 countdown(delay, "Phòng tiếp: ")
 
-        # Lưu lại session
-        context.storage_state(path=auth_state)
-        browser.close()
+        # Cookie đã tự lưu trong profile, chỉ cần đóng
+        context.close()
 
     print()
     log(f"{'=' * 60}")
