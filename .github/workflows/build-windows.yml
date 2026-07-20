@@ -1,9 +1,13 @@
 name: Build app Windows
 
-# Chạy tay từ tab Actions trên GitHub, hoặc tự chạy khi đẩy tag dạng v1.0
+# Lưu ý: nút "Run workflow" (workflow_dispatch) chỉ hiện trên GitHub khi file
+# này đã có ở nhánh mặc định (main). Trong lúc còn phát triển ở nhánh riêng,
+# dùng trigger push bên dưới để build tự động mỗi lần đẩy code lên.
 on:
   workflow_dispatch:
   push:
+    branches:
+      - build-windows
     tags:
       - "v*"
 
