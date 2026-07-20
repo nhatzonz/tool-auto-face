@@ -1,9 +1,13 @@
 """
-Script đăng bài cho thuê phòng trọ lên group Facebook theo khu vực.
-Mỗi phòng đăng đúng 1 bài lên group tương ứng với khu vực của nó.
-Dữ liệu phòng từ file Excel, ảnh từ thư mục images.
+Đăng bài hàng loạt lên group Facebook, dùng chung cho nhiều chiến dịch
+(cho thuê phòng trọ, tuyển dụng, seeding website...).
+
+Mỗi dòng trong Excel là 1 bài; cột "Phân loại" quyết định bài đó được đăng lên
+những group nào. Dữ liệu và bản đồ group của từng chiến dịch nằm trong
+config.json — sửa bằng giao diện: python gui.py
 # source .venv/bin/activate
 # python post_phong_tro_fb.py
+# .venv313/bin/python gui.py
 ⚠️ LƯU Ý:
 - Facebook chống automation, tài khoản có thể bị checkpoint/khóa.
 - Dùng tài khoản phụ, không dùng tài khoản chính.
@@ -18,98 +22,54 @@ from datetime import datetime
 import openpyxl
 from playwright.sync_api import sync_playwright
 
+import config as cfg_module
+
 # ======================== CẤU HÌNH ========================
 # Tự detect thư mục chứa script (hoạt động trên cả Mac và Windows)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-EXCEL_PATH = os.path.join(BASE_DIR, "phong_tro.xlsx")
-IMAGES_DIR = os.path.join(BASE_DIR, "anh_phong")
+# Toàn bộ cấu hình đọc từ config.json (sửa được bằng giao diện: python gui.py).
+# Các biến dưới đây được reload_config() gán lại theo chiến dịch đang chọn.
+EXCEL_PATH = SHEET_NAME = IMAGES_DIR = PROFILES_DIR = POSTED_LOG = None
+CAMPAIGN_NAME = ""
+GROUPS = {}
+MAX_POSTS = DELAY_BETWEEN_GROUPS = DELAY_BETWEEN_ROOMS = MAX_RETRIES = 0
 
-# Hỗ trợ nhiều tài khoản Facebook cùng lúc: mỗi acc là 1 thư mục profile Chrome
-# thật trong fb_profiles/<tên acc>/. Cookie nằm sẵn trong profile nên không cần
-# file session JSON.
-PROFILES_DIR = os.path.join(BASE_DIR, "fb_profiles")
 
-# Mapping khu vực → danh sách link group Facebook
-# Mỗi khu vực có thể có NHIỀU group, phòng sẽ được đăng lên TẤT CẢ group của khu vực đó
-# Key sẽ được normalize (bỏ dấu, viết thường, bỏ khoảng trắng) khi so khớp
-KHU_VUC_GROUPS = {
-    "Hà Đông": [
-        "https://web.facebook.com/groups/phongtro.hanoi.hadong/",
-        "https://web.facebook.com/groups/835892593690478/",
-        "https://web.facebook.com/groups/3555475404499952/",
-        "https://web.facebook.com/groups/1041520932684656/",
-        "https://web.facebook.com/groups/1589501227985413/",
-        "https://web.facebook.com/groups/631650078775924"
-    ],
-    "Thanh Xuân": [
-        "https://web.facebook.com/groups/nhatrodongdathanhxuan/",
-        "https://web.facebook.com/groups/176362986942358/",
-        "https://web.facebook.com/groups/605109991280427/",
-        "https://web.facebook.com/groups/908726406847516/",
-        "https://web.facebook.com/groups/timphongtrodongdangatusothanhxuanhanoi/",
-        "https://web.facebook.com/groups/1385595868491454/"
-    ],
-    "Bắc từ liêm": [
-        "https://web.facebook.com/groups/2012063565703273/",
-        "https://web.facebook.com/groups/1069950844149062/",
-        # "https://web.facebook.com/groups/1115314632966592/",
-        # "https://web.facebook.com/groups/1006836590849323/"
-    ],
-    "Cầu Giấy": [
-        "https://web.facebook.com/groups/142775226671894/",
-        "https://web.facebook.com/groups/702443907550431/",
-        "https://web.facebook.com/groups/370974904259405/",
-        "https://web.facebook.com/groups/1041097177406107/",
-        "https://web.facebook.com/groups/6104634336285691/",
-        "https://web.facebook.com/groups/nhatrometrimydinhcaugiay/",
-        "https://web.facebook.com/groups/phongtrocaugiayhn/",
-        "https://web.facebook.com/groups/140397885361011/",
-        "https://web.facebook.com/groups/2237019069763450/",
-        "https://web.facebook.com/groups/2202922693407349/"
+def reload_config(campaign=None):
+    """Nạp cấu hình của một chiến dịch vào các biến toàn cục.
 
-    ],
-    "Mỹ Đình" : [
-        "https://web.facebook.com/groups/1914388365626022/",
-        "https://web.facebook.com/groups/2237019069763450/",
-        "https://web.facebook.com/groups/phongtrocaugiaymydinhmetri/",
-        "https://web.facebook.com/groups/507104870413526/",
-        "https://web.facebook.com/groups/2148539488498466/",
-        "https://web.facebook.com/groups/1542856739594335/"
-    ],
-    "Ba Đình": [
-        "https://web.facebook.com/groups/phongtrobadinh.giatot/",
-        "https://web.facebook.com/groups/757259302549445/",
-        
-    ],
-    "Hai Bà Trưng" : [
-        "https://web.facebook.com/groups/1747492728936509/",
-        "https://web.facebook.com/groups/494231151747853/",
-        "https://web.facebook.com/groups/724565062266526/",
-        "https://web.facebook.com/groups/647543593374506/",
-        "https://web.facebook.com/groups/2790717834511802/"
-    ],
-    "Hoàng Mai": [
-        "https://web.facebook.com/groups/649420490421652/",
-        "https://web.facebook.com/groups/900402601097250/",
-        "https://web.facebook.com/groups/583641796650849/",
-        "https://web.facebook.com/groups/778767189186540/"
-    ],
-    "Thanh Trì": [
-        "https://web.facebook.com/groups/1145700312817923/",
-        "https://web.facebook.com/groups/964760639021647/",
-        "https://web.facebook.com/groups/TimPhongTroThanhTri/",
-        "https://web.facebook.com/groups/1620926588466366/"
-    ]
-    # Thêm khu vực khác tại đây, thay bằng ID group thật...
-}
+    `campaign` là tên chiến dịch; None = chiến dịch đang chọn trong config.
+    """
+    global EXCEL_PATH, SHEET_NAME, IMAGES_DIR, PROFILES_DIR, POSTED_LOG
+    global CAMPAIGN_NAME, GROUPS
+    global MAX_POSTS, DELAY_BETWEEN_GROUPS, DELAY_BETWEEN_ROOMS, MAX_RETRIES
 
-MAX_POSTS = 0         # 0 = đăng hết, >0 = giới hạn số phòng
-DELAY_BETWEEN_GROUPS = 10   # Delay (giây) giữa các group để tránh bị Facebook phát hiện
-DELAY_BETWEEN_ROOMS = 10    # Delay (giây) giữa các phòng khác nhau
-MAX_RETRIES = 2             # Số lần thử lại khi đăng lỗi
-POSTED_LOG = os.path.join(BASE_DIR, "posted_log.json")  # File ghi nhận bài đã đăng
+    cfg = cfg_module.load_config()
+    camp = cfg_module.get_campaign(cfg, campaign)
 
+    CAMPAIGN_NAME = campaign or cfg["active_campaign"]
+    PROFILES_DIR = cfg["profiles_dir"]        # nick dùng chung mọi chiến dịch
+    EXCEL_PATH = camp["excel_path"]
+    SHEET_NAME = camp["sheet_name"]
+    IMAGES_DIR = camp["images_dir"]
+    # posted_log rỗng sẽ làm tắt im lặng toàn bộ chống đăng trùng, nên luôn ép
+    # về một đường dẫn hợp lệ theo tên chiến dịch.
+    POSTED_LOG = camp["posted_log"] or os.path.join(
+        BASE_DIR, f"posted_log_{cfg_module.slug(CAMPAIGN_NAME)}.json")
+    GROUPS = camp["groups"]
+    MAX_POSTS = camp["max_posts"]
+    DELAY_BETWEEN_GROUPS = camp["delay_between_groups"]
+    DELAY_BETWEEN_ROOMS = camp["delay_between_rooms"]
+    MAX_RETRIES = camp["max_retries"]
+    return cfg
+
+
+reload_config()
+
+# GUI gán lại 2 hook này để hứng log và yêu cầu dừng giữa chừng.
+LOG_FN = print          # nhận 1 chuỗi đã kèm timestamp
+SHOULD_STOP = lambda: False
 
 # ======================== TRÁNH ĐĂNG TRÙNG ========================
 
@@ -128,7 +88,7 @@ def save_posted_log(posted):
 
 
 def is_posted(posted, stt, group_url):
-    """Kiểm tra phòng này đã đăng lên group này chưa."""
+    """Kiểm tra bài này đã đăng lên group này chưa."""
     key = f"{stt}|{group_url}"
     return key in posted
 
@@ -142,41 +102,41 @@ def mark_posted(posted, stt, group_url):
 
 # ======================== ĐỌC DỮ LIỆU ========================
 
-def load_rooms():
+def load_items():
     """
-    Đọc danh sách phòng từ Excel.
-    Cấu trúc sheet 'PhongTro':
+    Đọc danh sách bài cần đăng từ Excel của chiến dịch đang chọn.
+    Cấu trúc sheet (tên sheet lấy từ cấu hình chiến dịch):
       A: STT (số thứ tự, dùng để sắp xếp thứ tự đăng)
-      B: Mô tả chi tiết (dùng làm caption bài đăng)
-      C: Địa chỉ (dùng để match với key trong KHU_VUC_GROUPS)
-      D: Tên thư mục ảnh (trong IMAGES_DIR)
+      B: Nội dung bài (dùng làm caption)
+      C: Phân loại (khu vực / ngành nghề / chủ đề — match với key trong GROUPS)
+      D: Tên thư mục ảnh trong IMAGES_DIR (để trống nếu đăng bài không ảnh)
     """
     wb = openpyxl.load_workbook(EXCEL_PATH)
-    ws = wb["PhongTro"]
-    rooms = []
+    ws = wb[SHEET_NAME]
+    items = []
 
     for row in range(2, ws.max_row + 1):
         stt = ws.cell(row=row, column=1).value
         if stt is None:
             continue
 
-        mo_ta = ws.cell(row=row, column=2).value or ""
-        dia_chi = ws.cell(row=row, column=3).value or ""
+        noi_dung = ws.cell(row=row, column=2).value or ""
+        phan_loai = ws.cell(row=row, column=3).value or ""
         folder_anh = ws.cell(row=row, column=4).value or ""
 
         images = find_images(folder_anh)
 
-        rooms.append({
+        items.append({
             "stt": int(float(stt)),
-            "mo_ta": str(mo_ta).strip(),
-            "dia_chi": str(dia_chi).strip(),
+            "noi_dung": str(noi_dung).strip(),
+            "phan_loai": str(phan_loai).strip(),
             "images": images,
             "row": row,
         })
 
     # Sắp xếp theo STT
-    rooms.sort(key=lambda r: r["stt"])
-    return rooms
+    items.sort(key=lambda r: r["stt"])
+    return items
 
 
 def find_images(folder_name):
@@ -194,9 +154,9 @@ def find_images(folder_name):
     ]
 
 
-def format_post_content(room):
-    """Trả về mô tả chi tiết làm caption bài đăng."""
-    return room["mo_ta"]
+def format_post_content(item):
+    """Trả về nội dung dùng làm caption bài đăng."""
+    return item["noi_dung"]
 
 
 def normalize(text):
@@ -214,17 +174,152 @@ def normalize(text):
     return text
 
 
-def get_group_urls(khu_vuc):
-    """Tìm danh sách group Facebook tương ứng với khu vực (so khớp bỏ dấu). Trả về list URL hoặc []."""
-    kv_norm = normalize(khu_vuc)
+def tim_phan_loai_khop(phan_loai):
+    """Trả về (khớp_chính_xác, [các_khớp_một_phần]) cho một giá trị cột C.
+
+    Tách riêng để tab kiểm tra dữ liệu chỉ ra được chỗ nhập nhằng: 'Kế toán'
+    và 'Kế toán trưởng' khớp lẫn nhau theo kiểu chuỗi con, nếu không cảnh báo
+    thì bài sẽ âm thầm đăng lên sai tập group.
+    """
+    kv_norm = normalize(phan_loai)
     if not kv_norm:
-        return []
-    for key, urls in KHU_VUC_GROUPS.items():
+        return None, []
+
+    chinh_xac = None
+    mot_phan = []
+    for key in GROUPS:
         key_norm = normalize(key)
-        if kv_norm == key_norm or kv_norm in key_norm or key_norm in kv_norm:
-            # Bỏ qua nếu list rỗng (khu vực chưa có group)
-            return [u for u in urls if u.strip()]
-    return []
+        if kv_norm == key_norm:
+            chinh_xac = key
+        elif kv_norm in key_norm or key_norm in kv_norm:
+            mot_phan.append(key)
+    return chinh_xac, mot_phan
+
+
+def get_group_urls(phan_loai):
+    """Tìm danh sách group ứng với phân loại của bài (so khớp bỏ dấu). Trả về list URL hoặc [].
+
+    Khớp chính xác được ưu tiên; chỉ khi không có mới xét khớp một phần như cũ.
+    """
+    chinh_xac, mot_phan = tim_phan_loai_khop(phan_loai)
+    key = chinh_xac or (mot_phan[0] if mot_phan else None)
+    if key is None:
+        return []
+    if chinh_xac is None and len(mot_phan) > 1:
+        log(f"  ⚠ '{phan_loai}' khớp nhập nhằng với: {', '.join(mot_phan)} — đang dùng '{key}'")
+    # Bỏ qua nếu list rỗng (phân loại chưa gán group nào)
+    return [u for u in GROUPS[key] if u.strip()]
+
+
+# ======================== KIỂM TRA DỮ LIỆU ========================
+
+def kiem_tra_du_lieu(campaign=None):
+    """Soát toàn bộ cấu hình + Excel của một chiến dịch TRƯỚC khi đăng.
+
+    Trả về list dict: {"muc": "lỗi"|"canh_bao", "o": mô tả vị trí, "chi_tiet": ...}
+      - "lỗi"      : chắc chắn hỏng, không nên chạy
+      - "canh_bao" : chạy được nhưng kết quả có thể không như ý
+    """
+    if campaign:
+        reload_config(campaign)
+
+    van_de = []
+    loi = lambda o, ct: van_de.append({"muc": "loi", "o": o, "chi_tiet": ct})
+    canh_bao = lambda o, ct: van_de.append({"muc": "canh_bao", "o": o, "chi_tiet": ct})
+
+    # --- Cấu hình ---
+    if not EXCEL_PATH or not os.path.exists(EXCEL_PATH):
+        loi("File Excel", f"Không tìm thấy: {EXCEL_PATH or '(chưa đặt)'}")
+        return van_de
+    try:
+        wb = openpyxl.load_workbook(EXCEL_PATH)
+    except Exception as e:
+        loi("File Excel", f"Không đọc được: {e}")
+        return van_de
+    if SHEET_NAME not in wb.sheetnames:
+        loi("Sheet", f"File không có sheet '{SHEET_NAME}'. Đang có: {', '.join(wb.sheetnames)}")
+        return van_de
+
+    if not GROUPS:
+        loi("Nhóm", "Chiến dịch chưa khai báo phân loại nào")
+    if not IMAGES_DIR or not os.path.isdir(IMAGES_DIR):
+        canh_bao("Thư mục ảnh", f"Không tồn tại: {IMAGES_DIR or '(chưa đặt)'} — mọi bài sẽ đăng không ảnh")
+
+    # --- Phân loại nhập nhằng / rỗng ---
+    for key, urls in GROUPS.items():
+        sach = [u for u in urls if u.strip()]
+        if not sach:
+            canh_bao(f"Phân loại '{key}'", "Chưa có link group nào — bài thuộc loại này sẽ bị bỏ qua")
+        xau = [u for u in sach if not u.startswith("http")]
+        if xau:
+            loi(f"Phân loại '{key}'", f"Link không hợp lệ: {', '.join(xau[:3])}")
+
+    ten = list(GROUPS)
+    for i, a in enumerate(ten):
+        for b in ten[i + 1:]:
+            na, nb = normalize(a), normalize(b)
+            if na == nb:
+                loi("Phân loại trùng", f"'{a}' và '{b}' giống nhau sau khi bỏ dấu → luôn khớp nhầm")
+            elif na in nb or nb in na:
+                canh_bao("Phân loại lồng nhau",
+                         f"'{a}' và '{b}' khớp chuỗi con lẫn nhau — ô Excel phải ghi "
+                         f"CHÍNH XÁC một trong hai, nếu không sẽ đăng sai nhóm")
+
+    # --- Từng dòng Excel ---
+    ws = wb[SHEET_NAME]
+    stt_da_gap = {}
+    for row in range(2, ws.max_row + 1):
+        stt = ws.cell(row=row, column=1).value
+        noi_dung = ws.cell(row=row, column=2).value
+        phan_loai = ws.cell(row=row, column=3).value
+        folder = ws.cell(row=row, column=4).value
+
+        trong = [v for v in (stt, noi_dung, phan_loai, folder)
+                 if v is not None and str(v).strip()]
+        if not trong:
+            continue
+
+        vi_tri = f"Dòng {row}"
+        if stt is None or str(stt).strip() == "":
+            loi(vi_tri, "Thiếu STT ở cột A → cả dòng bị bỏ qua im lặng")
+            continue
+        try:
+            stt = int(float(stt))
+        except (TypeError, ValueError):
+            loi(vi_tri, f"STT '{stt}' không phải số")
+            continue
+
+        if stt in stt_da_gap:
+            loi(vi_tri, f"STT {stt} trùng với dòng {stt_da_gap[stt]} → dòng sau bị bỏ qua vĩnh viễn")
+        else:
+            stt_da_gap[stt] = row
+
+        vi_tri = f"Dòng {row} (STT {stt})"
+        if not noi_dung or not str(noi_dung).strip():
+            loi(vi_tri, "Nội dung bài trống")
+
+        if not phan_loai or not str(phan_loai).strip():
+            loi(vi_tri, "Thiếu phân loại ở cột C → không biết đăng lên nhóm nào")
+        else:
+            chinh_xac, mot_phan = tim_phan_loai_khop(phan_loai)
+            if not chinh_xac and not mot_phan:
+                loi(vi_tri, f"Phân loại '{str(phan_loai).strip()}' chưa khai trong danh sách nhóm → bài bị bỏ qua")
+            elif not chinh_xac and len(mot_phan) > 1:
+                canh_bao(vi_tri, f"'{str(phan_loai).strip()}' khớp nhiều phân loại: "
+                                 f"{', '.join(mot_phan)} → sẽ dùng '{mot_phan[0]}'")
+            elif not chinh_xac:
+                canh_bao(vi_tri, f"'{str(phan_loai).strip()}' không khớp chính xác, "
+                                 f"đang hiểu là '{mot_phan[0]}'")
+
+        if folder and str(folder).strip():
+            duong_dan = os.path.join(IMAGES_DIR or "", str(folder).strip())
+            if not os.path.isdir(duong_dan):
+                canh_bao(vi_tri, f"Không có thư mục ảnh '{str(folder).strip()}' → "
+                                 f"bài sẽ đăng KHÔNG ẢNH và bị ghi nhận là đã đăng")
+            elif not find_images(str(folder).strip()):
+                canh_bao(vi_tri, f"Thư mục ảnh '{str(folder).strip()}' không có file ảnh nào")
+
+    return van_de
 
 
 # ======================== ĐĂNG NHẬP ========================
@@ -384,17 +479,32 @@ def choose_account():
 # ======================== ĐĂNG BÀI LÊN 1 GROUP ========================
 
 def log(msg):
-    """In log kèm timestamp."""
+    """In log kèm timestamp qua LOG_FN (terminal hoặc ô log của GUI)."""
     now = datetime.now().strftime("%H:%M:%S")
-    print(f"[{now}] {msg}")
+    LOG_FN(f"[{now}] {msg}")
+
+
+class StopRequested(Exception):
+    """Người dùng bấm Dừng trên giao diện."""
+
+
+def check_stop():
+    """Ném StopRequested nếu GUI yêu cầu dừng."""
+    if SHOULD_STOP():
+        raise StopRequested()
 
 
 def countdown(seconds, label=""):
-    """Đếm ngược hiển thị trên terminal."""
+    """Chờ `seconds` giây, mỗi giây kiểm tra xem có bị yêu cầu dừng không."""
     for i in range(seconds, 0, -1):
-        print(f"\r  ⏳ {label}Chờ {i}s...  ", end="", flush=True)
+        check_stop()
+        if LOG_FN is print:
+            print(f"\r  ⏳ {label}Chờ {i}s...  ", end="", flush=True)
         time.sleep(1)
-    print(f"\r  ✓ {label}Tiếp tục!      ")
+    if LOG_FN is print:
+        print(f"\r  ✓ {label}Tiếp tục!      ")
+    else:
+        log(f"  ✓ {label}Đã chờ {seconds}s, tiếp tục!")
 
 
 def close_popup_if_any(page):
@@ -650,32 +760,36 @@ def post_to_group(page, group_url, content, images):
 
 # ======================== MAIN ========================
 
-def main():
-    rooms = load_rooms()
+def run_posting(profile_dir, confirm_nick=None, campaign=None):
+    """Chạy toàn bộ vòng đăng bài của một chiến dịch với profile đã chọn.
+
+    Không gọi input() ở đâu cả nên dùng được cho cả CLI lẫn GUI.
+    `confirm_nick(ten_nick) -> bool`: hỏi lại người dùng có đúng nick không
+    (CLI truyền hàm hỏi qua terminal, GUI truyền None vì đã chọn nick sẵn).
+    `campaign`: tên chiến dịch; None = dùng chiến dịch đang chọn trong config.
+    Trả về dict thống kê, hoặc None nếu dừng trước khi đăng.
+    """
+    if campaign:
+        reload_config(campaign)
+
+    items = load_items()
 
     log(f"{'=' * 60}")
-    log(f"Tổng số phòng trong Excel: {len(rooms)}")
+    log(f"Chiến dịch: {CAMPAIGN_NAME}")
+    log(f"Tổng số bài trong Excel: {len(items)}")
 
-    batch = rooms[:MAX_POSTS] if MAX_POSTS > 0 else rooms
+    batch = items[:MAX_POSTS] if MAX_POSTS > 0 else items
 
     # Tính tổng số bài sẽ đăng
     total_posts = 0
-    for room in batch:
-        urls = get_group_urls(room["dia_chi"])
+    for item in batch:
+        urls = get_group_urls(item["phan_loai"])
         total_posts += len(urls)
 
-    log(f"Sẽ đăng {len(batch)} phòng → ~{total_posts} bài (theo thứ tự STT)")
+    log(f"Sẽ đăng {len(batch)} mục → ~{total_posts} lượt đăng (theo thứ tự STT)")
     log(f"{'=' * 60}")
 
-    # Chọn tài khoản Facebook để đăng bài (acc đã login hoặc đăng nhập mới)
-    profile_dir = choose_account()
-
     posted = load_posted_log()
-    ok = 0
-    fail = 0
-    skip = 0
-    dup = 0
-    post_num = 0
 
     with sync_playwright() as p:
         context = open_profile(p, profile_dir)
@@ -688,65 +802,92 @@ def main():
         if is_logged_in(page):
             profile_name = get_profile_name(page)
             log(f"Đang đăng nhập với nick: {profile_name}")
-            confirm = input(f"\n>>> Đúng nick '{profile_name}'? Nhấn Enter để tiếp tục, gõ 'q' để hủy: ").strip()
-            if confirm.lower() == 'q':
-                log("Đã hủy. Chọn [2] khi chạy lại nếu muốn đổi nick.")
+            if confirm_nick and not confirm_nick(profile_name):
+                log("Đã hủy — không đúng nick.")
                 context.close()
-                return
+                return None
         else:
-            log("⚠ Chưa đăng nhập. Mở lại để đăng nhập...")
+            log("⚠ Profile này chưa đăng nhập Facebook. Hãy đăng nhập cho acc này rồi chạy lại.")
             context.close()
-            if not login_facebook(p, profile_dir):
-                log("Không đăng nhập được. Dừng lại.")
-                return
-            context = open_profile(p, profile_dir)
-            page = get_page(context)
+            return None
 
-        for i, room in enumerate(batch):
-            print()
+        try:
+            stats = _post_all(page, batch, posted, total_posts)
+        except StopRequested:
+            log("⏹ Đã dừng theo yêu cầu.")
+            stats = None
+        finally:
+            # Cookie đã tự lưu trong profile, chỉ cần đóng
+            context.close()
+
+    return stats
+
+
+def _post_all(page, batch, posted, total_posts):
+    """Vòng lặp đăng bài cho toàn bộ danh sách. Trả về dict thống kê."""
+    ok = fail = skip = dup = post_num = 0
+    loi_chi_tiet = []       # để cuối buổi liệt kê rõ bài nào hỏng ở group nào
+
+    for i, item in enumerate(batch):
+            check_stop()
             log(f"{'─' * 60}")
-            log(f"PHÒNG {i + 1}/{len(batch)} | STT {room['stt']} | Row {room['row']}")
-            log(f"  Địa chỉ : {room['dia_chi']}")
-            log(f"  Caption  : {room['mo_ta'][:80]}{'...' if len(room['mo_ta']) > 80 else ''}")
-            log(f"  Ảnh      : {len(room['images'])} file")
+            log(f"MỤC {i + 1}/{len(batch)} | STT {item['stt']} | Row {item['row']}")
+            log(f"  Phân loại: {item['phan_loai']}")
+            log(f"  Caption  : {item['noi_dung'][:80]}{'...' if len(item['noi_dung']) > 80 else ''}")
+            log(f"  Ảnh      : {len(item['images'])} file")
 
             # Tìm các group theo địa chỉ
-            group_urls = get_group_urls(room["dia_chi"])
+            group_urls = get_group_urls(item["phan_loai"])
             if not group_urls:
-                log(f"  ⚠ BỎ QUA — Không tìm thấy group cho '{room['dia_chi']}'")
+                log(f"  ⚠ BỎ QUA — Không tìm thấy group cho '{item['phan_loai']}'")
+                loi_chi_tiet.append(
+                    f"STT {item['stt']}: phân loại '{item['phan_loai']}' chưa khai nhóm → bỏ qua")
                 skip += 1
                 continue
 
-            log(f"  Tìm thấy {len(group_urls)} group cho khu vực này")
+            log(f"  Tìm thấy {len(group_urls)} group cho phân loại này")
 
-            content = format_post_content(room)
+            content = format_post_content(item)
 
             for j, group_url in enumerate(group_urls):
                 post_num += 1
                 log(f"  ── Group {j + 1}/{len(group_urls)} (bài {post_num}/{total_posts})")
 
                 # Kiểm tra đã đăng chưa
-                if is_posted(posted, room["stt"], group_url):
+                if is_posted(posted, item["stt"], group_url):
                     log(f"  ⏭ ĐÃ ĐĂNG TRƯỚC ĐÓ — bỏ qua")
                     dup += 1
                     continue
 
                 # Đăng bài với retry
                 success = False
+                loi_cuoi = ""
                 for attempt in range(1, MAX_RETRIES + 1):
                     try:
-                        post_to_group(page, group_url, content, room["images"])
-                        mark_posted(posted, room["stt"], group_url)
-                        ok += 1
-                        success = True
-                        break
+                        post_to_group(page, group_url, content, item["images"])
                     except Exception as e:
+                        loi_cuoi = str(e).split(chr(10))[0][:200]
                         log(f"  ✗ LỖI (lần {attempt}/{MAX_RETRIES}): {e}")
                         if attempt < MAX_RETRIES:
                             retry_delay = 10 + random.randint(0, 5)
                             countdown(retry_delay, "Thử lại: ")
+                        continue
+
+                    # Bài ĐÃ lên Facebook. Ghi dấu tách riêng khỏi try ở trên:
+                    # nếu ghi log lỗi mà vẫn nằm chung try thì sẽ bị coi là đăng
+                    # hỏng và retry, làm bài thứ hai y hệt lên cùng group.
+                    ok += 1
+                    success = True
+                    try:
+                        mark_posted(posted, item["stt"], group_url)
+                    except Exception as e:
+                        log(f"  ⚠ ĐÃ ĐĂNG XONG nhưng không ghi được log chống trùng: {e}")
+                        log(f"  ⚠ Lần chạy sau bài STT {item['stt']} có thể bị đăng lại lên group này.")
+                    break
                 if not success:
                     fail += 1
+                    loi_chi_tiet.append(
+                        f"STT {item['stt']} → {group_url}: {loi_cuoi}")
 
                 # Delay giữa các group để tránh bị Facebook phát hiện spam
                 if j < len(group_urls) - 1:
@@ -756,15 +897,57 @@ def main():
             # Delay giữa các phòng
             if i < len(batch) - 1:
                 delay = DELAY_BETWEEN_ROOMS + random.randint(0, 5)
-                countdown(delay, "Phòng tiếp: ")
+                countdown(delay, "Mục tiếp: ")
 
-        # Cookie đã tự lưu trong profile, chỉ cần đóng
-        context.close()
-
-    print()
     log(f"{'=' * 60}")
     log(f"KẾT QUẢ: {ok} thành công | {fail} lỗi | {skip} bỏ qua | {dup} đã đăng trước đó")
     log(f"{'=' * 60}")
+
+    if loi_chi_tiet:
+        log("")
+        log(f"CHI TIẾT {len(loi_chi_tiet)} TRƯỜNG HỢP KHÔNG ĐĂNG ĐƯỢC:")
+        for dong in loi_chi_tiet:
+            log(f"  • {dong}")
+        log(f"{'=' * 60}")
+
+    return {"ok": ok, "fail": fail, "skip": skip, "dup": dup, "loi": loi_chi_tiet}
+
+
+def choose_campaign():
+    """Menu chọn chiến dịch. Trả về tên chiến dịch."""
+    cfg = cfg_module.load_config()
+    names = list(cfg["campaigns"])
+    if len(names) == 1:
+        return names[0]
+
+    print()
+    log(f"{'=' * 60}")
+    log("CHỌN CHIẾN DỊCH")
+    for idx, name in enumerate(names, start=1):
+        mark = " (đang chọn)" if name == cfg["active_campaign"] else ""
+        print(f"   [{idx}] {name}{mark}")
+    log(f"{'=' * 60}")
+
+    while True:
+        sel = input(f"\n>>> Chọn (1-{len(names)}, Enter = đang chọn): ").strip()
+        if not sel:
+            return cfg["active_campaign"]
+        if sel.isdigit() and 1 <= int(sel) <= len(names):
+            return names[int(sel) - 1]
+        print("  ⚠ Lựa chọn không hợp lệ.")
+
+
+def main():
+    """Chạy bằng terminal: chọn chiến dịch, chọn acc, rồi đăng."""
+    campaign = choose_campaign()
+    reload_config(campaign)
+    profile_dir = choose_account()
+
+    def confirm_nick(name):
+        answer = input(f"\n>>> Đúng nick '{name}'? Nhấn Enter để tiếp tục, gõ 'q' để hủy: ").strip()
+        return answer.lower() != "q"
+
+    run_posting(profile_dir, confirm_nick=confirm_nick, campaign=campaign)
 
 
 if __name__ == "__main__":

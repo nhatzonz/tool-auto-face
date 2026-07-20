@@ -1,0 +1,113 @@
+{
+  "profiles_dir": "/Users/nhatnguyen/tool_auto/fb_profiles",
+  "active_campaign": "Phòng trọ",
+  "campaigns": {
+    "Phòng trọ": {
+      "excel_path": "/Users/nhatnguyen/tool_auto/phong_tro.xlsx",
+      "sheet_name": "PhongTro",
+      "images_dir": "/Users/nhatnguyen/tool_auto/anh_phong",
+      "posted_log": "/Users/nhatnguyen/tool_auto/posted_log.json",
+      "max_posts": 0,
+      "delay_between_groups": 10,
+      "delay_between_rooms": 10,
+      "max_retries": 2,
+      "groups": {
+        "Hà Đông": [
+          "https://web.facebook.com/groups/phongtro.hanoi.hadong/",
+          "https://web.facebook.com/groups/835892593690478/",
+          "https://web.facebook.com/groups/3555475404499952/",
+          "https://web.facebook.com/groups/1041520932684656/",
+          "https://web.facebook.com/groups/1589501227985413/",
+          "https://web.facebook.com/groups/631650078775924"
+        ],
+        "Thanh Xuân": [
+          "https://web.facebook.com/groups/nhatrodongdathanhxuan/",
+          "https://web.facebook.com/groups/176362986942358/",
+          "https://web.facebook.com/groups/605109991280427/",
+          "https://web.facebook.com/groups/908726406847516/",
+          "https://web.facebook.com/groups/timphongtrodongdangatusothanhxuanhanoi/",
+          "https://web.facebook.com/groups/1385595868491454/"
+        ],
+        "Bắc từ liêm": [
+          "https://web.facebook.com/groups/2012063565703273/",
+          "https://web.facebook.com/groups/1069950844149062/"
+        ],
+        "Cầu Giấy": [
+          "https://web.facebook.com/groups/142775226671894/",
+          "https://web.facebook.com/groups/702443907550431/",
+          "https://web.facebook.com/groups/370974904259405/",
+          "https://web.facebook.com/groups/1041097177406107/",
+          "https://web.facebook.com/groups/6104634336285691/",
+          "https://web.facebook.com/groups/nhatrometrimydinhcaugiay/",
+          "https://web.facebook.com/groups/phongtrocaugiayhn/",
+          "https://web.facebook.com/groups/140397885361011/",
+          "https://web.facebook.com/groups/2237019069763450/",
+          "https://web.facebook.com/groups/2202922693407349/"
+        ],
+        "Mỹ Đình": [
+          "https://web.facebook.com/groups/1914388365626022/",
+          "https://web.facebook.com/groups/phongtrocaugiaymydinhmetri/",
+          "https://web.facebook.com/groups/507104870413526/",
+          "https://web.facebook.com/groups/2148539488498466/",
+          "https://web.facebook.com/groups/1542856739594335/"
+        ],
+        "Đống Đa": [
+          "https://web.facebook.com/groups/2164253147110686/",
+          "https://web.facebook.com/groups/nhatrodongda/",
+          "https://web.facebook.com/groups/1543681556185663/",
+          "https://web.facebook.com/groups/phongtrodongda.giatot/",
+          "https://web.facebook.com/groups/339486105194537/",
+          "https://web.facebook.com/groups/1463616736996432/",
+          "https://web.facebook.com/groups/timphongtrobadinhdongda/",
+          "https://web.facebook.com/groups/326807703484066/",
+          "https://web.facebook.com/groups/1219620464761959/"
+        ],
+        "Ba Đình": [
+          "https://web.facebook.com/groups/phongtrobadinh.giatot/",
+          "https://web.facebook.com/groups/757259302549445/"
+        ],
+        "Hai Bà Trưng": [
+          "https://web.facebook.com/groups/1747492728936509/",
+          "https://web.facebook.com/groups/494231151747853/",
+          "https://web.facebook.com/groups/724565062266526/",
+          "https://web.facebook.com/groups/647543593374506/",
+          "https://web.facebook.com/groups/2790717834511802/"
+        ],
+        "Hoàng Mai": [
+          "https://web.facebook.com/groups/649420490421652/",
+          "https://web.facebook.com/groups/900402601097250/",
+          "https://web.facebook.com/groups/583641796650849/",
+          "https://web.facebook.com/groups/778767189186540/"
+        ],
+        "Thanh Trì": [
+          "https://web.facebook.com/groups/1145700312817923/",
+          "https://web.facebook.com/groups/964760639021647/",
+          "https://web.facebook.com/groups/TimPhongTroThanhTri/",
+          "https://web.facebook.com/groups/1620926588466366/"
+        ]
+      }
+    },
+    "Tuyển dụng": {
+      "excel_path": "/Users/nhatnguyen/tool_auto/tuyen_dung.xlsx",
+      "sheet_name": "TuyenDung",
+      "images_dir": "/Users/nhatnguyen/tool_auto/anh_tuyen_dung",
+      "posted_log": "/Users/nhatnguyen/tool_auto/posted_log_tuyen_dung.json",
+      "max_posts": 0,
+      "delay_between_groups": 10,
+      "delay_between_rooms": 10,
+      "max_retries": 2,
+      "groups": {}
+    },
+    "Seeding website": {
+      "excel_path": "/Users/nhatnguyen/tool_auto/seeding_web.xlsx",
+      "sheet_name": "Seeding",
+      "images_dir": "/Users/nhatnguyen/tool_auto/anh_seeding_web",
+      "posted_log": "/Users/nhatnguyen/tool_auto/posted_log_seeding_website.json",
+      "max_posts": 0,
+      "delay_between_groups": 10,
+      "delay_between_rooms": 10,
+      "max_retries": 2,
+      "groups": {}
+    }
+  }
+}

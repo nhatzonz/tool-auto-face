@@ -10,7 +10,7 @@ __pycache__/
 fb_auth_state*.json
 fb_sessions/
 fb_profiles/
-posted_log.json
+posted_log*.json
 
 # File Excel dữ liệu phòng (và file tạm ~$ của Office)
 *.xlsx
