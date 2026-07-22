@@ -27,3 +27,6 @@ config.json.tmp
 # Kết quả đóng gói PyInstaller
 build/
 dist/
+
+# Bản sao lưu Excel tool tự tạo mỗi lần bấm "Ghi vào file Excel"
+*.xlsx.bak

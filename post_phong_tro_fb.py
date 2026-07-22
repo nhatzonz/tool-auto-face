@@ -23,6 +23,7 @@ import openpyxl
 from playwright.sync_api import sync_playwright
 
 import config as cfg_module
+import lich_hen
 import paths
 
 # Chuẩn bị môi trường cho bản đóng gói (không tác dụng gì khi chạy mã nguồn)
@@ -39,6 +40,7 @@ EXCEL_PATH = SHEET_NAME = IMAGES_DIR = PROFILES_DIR = POSTED_LOG = None
 CAMPAIGN_NAME = ""
 GROUPS = {}
 MAX_POSTS = DELAY_BETWEEN_GROUPS = DELAY_BETWEEN_ROOMS = MAX_RETRIES = 0
+CHONG_TRUNG = True
 
 
 def reload_config(campaign=None):
@@ -47,7 +49,7 @@ def reload_config(campaign=None):
     `campaign` là tên chiến dịch; None = chiến dịch đang chọn trong config.
     """
     global EXCEL_PATH, SHEET_NAME, IMAGES_DIR, PROFILES_DIR, POSTED_LOG
-    global CAMPAIGN_NAME, GROUPS
+    global CAMPAIGN_NAME, GROUPS, CHONG_TRUNG
     global MAX_POSTS, DELAY_BETWEEN_GROUPS, DELAY_BETWEEN_ROOMS, MAX_RETRIES
 
     cfg = cfg_module.load_config()
@@ -67,6 +69,7 @@ def reload_config(campaign=None):
     DELAY_BETWEEN_GROUPS = camp["delay_between_groups"]
     DELAY_BETWEEN_ROOMS = camp["delay_between_rooms"]
     MAX_RETRIES = camp["max_retries"]
+    CHONG_TRUNG = bool(camp.get("chong_trung", True))
     return cfg
 
 
@@ -92,16 +95,47 @@ def save_posted_log(posted):
         json.dump(posted, f, ensure_ascii=False, indent=2)
 
 
+def _ngay_da_dang(gia_tri):
+    """Lấy phần ngày trong dấu thời gian của log; None nếu không đọc được."""
+    try:
+        return datetime.strptime(str(gia_tri)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 def is_posted(posted, stt, group_url):
-    """Kiểm tra bài này đã đăng lên group này chưa."""
-    key = f"{stt}|{group_url}"
-    return key in posted
+    """Bài này đã đăng lên group này TRONG NGÀY HÔM NAY chưa.
+
+    Chỉ chặn trong ngày, không chặn vĩnh viễn: tin phòng trọ hay tuyển dụng
+    cần được đăng lại định kỳ cho nổi lên, chặn mãi mãi thì mỗi lần muốn đăng
+    lại phải xóa sạch lịch sử của cả chiến dịch — kéo theo cả những bài vừa
+    đăng sáng nay cũng lên lần nữa.
+
+    Ngày tính theo giờ Việt Nam để khớp với lịch hẹn giờ, không phụ thuộc múi
+    giờ máy. Tắt CHONG_TRUNG thì bỏ qua kiểm tra hoàn toàn.
+    """
+    if not CHONG_TRUNG:
+        return False
+
+    gia_tri = posted.get(f"{stt}|{group_url}")
+    if gia_tri is None:
+        return False
+
+    ngay = _ngay_da_dang(gia_tri)
+    # Không đọc nổi ngày (file bị sửa tay hoặc hỏng) thì coi như đã đăng: thà
+    # bỏ lỡ một lượt còn hơn rải bài trùng lên group.
+    return ngay is None or ngay == lich_hen.bay_gio().date()
 
 
 def mark_posted(posted, stt, group_url):
-    """Đánh dấu đã đăng thành công."""
+    """Đánh dấu đã đăng thành công.
+
+    Ghi theo giờ Việt Nam, KHÔNG dùng datetime.now() của máy: is_posted() so
+    ngày theo giờ Việt Nam, hai bên lệch múi giờ là bài vừa đăng xong đã bị coi
+    như đăng từ hôm khác và được đăng lại ngay lần chạy kế tiếp.
+    """
     key = f"{stt}|{group_url}"
-    posted[key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    posted[key] = lich_hen.bay_gio().strftime("%Y-%m-%d %H:%M:%S")
     save_posted_log(posted)
 
 
@@ -870,9 +904,9 @@ def _post_all(page, batch, posted, total_posts):
                 post_num += 1
                 log(f"  ── Group {j + 1}/{len(group_urls)} (bài {post_num}/{total_posts})")
 
-                # Kiểm tra đã đăng chưa
+                # Kiểm tra hôm nay đã đăng bài này lên group này chưa
                 if is_posted(posted, item["stt"], group_url):
-                    log(f"  ⏭ ĐÃ ĐĂNG TRƯỚC ĐÓ — bỏ qua")
+                    log(f"  ⏭ ĐÃ ĐĂNG HÔM NAY — bỏ qua (chống đăng trùng đang bật)")
                     dup += 1
                     continue
 
@@ -917,8 +951,17 @@ def _post_all(page, batch, posted, total_posts):
                 countdown(delay, "Mục tiếp: ")
 
     log(f"{'=' * 60}")
-    log(f"KẾT QUẢ: {ok} thành công | {fail} lỗi | {skip} bỏ qua | {dup} đã đăng trước đó")
+    log(f"KẾT QUẢ: {ok} thành công | {fail} lỗi | {skip} bỏ qua | {dup} đã đăng hôm nay")
     log(f"{'=' * 60}")
+
+    if dup:
+        log("")
+        log(f"⚠ {dup} lượt không đăng vì HÔM NAY đã đăng rồi — tính năng chống")
+        log("  đăng trùng đang bật. Muốn đăng lại ngay trong hôm nay, chọn 1:")
+        log("    • Bấm '🗑 Xóa lịch sử đã đăng' rồi chạy lại, hoặc")
+        log("    • Tắt ô 'Chống đăng trùng' ở tab 'Dữ liệu chiến dịch'.")
+        log("  Để nguyên thì sang ngày mai các bài này lại đăng được bình thường.")
+        log(f"{'=' * 60}")
 
     if loi_chi_tiet:
         log("")

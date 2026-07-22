@@ -13,6 +13,7 @@ vực, với tuyển dụng có thể là ngành nghề, với seeding là chủ
 """
 import os
 import json
+import shutil
 
 import paths
 
@@ -31,12 +32,18 @@ CAMPAIGN_DEFAULTS = {
     "delay_between_groups": 10,
     "delay_between_rooms": 10,
     "max_retries": 2,
+    # Bật: không đăng lại bài đã lên group đó trong cùng ngày. Tắt: đăng bất
+    # chấp lịch sử. Xem is_posted() trong post_phong_tro_fb.py.
+    "chong_trung": True,
     "groups": {},
 }
 
 DEFAULT_CONFIG = {
     "profiles_dir": os.path.join(BASE_DIR, "fb_profiles"),
     "active_campaign": "Phòng trọ",
+    # Lịch hẹn giờ đăng bài — xem lich_hen.py. Để ở gốc chứ không nằm trong
+    # từng chiến dịch vì một lịch tự chọn lấy chiến dịch và nick của nó.
+    "schedules": [],
     "campaigns": {
         "Phòng trọ": {
             "excel_path": os.path.join(BASE_DIR, "phong_tro.xlsx"),
@@ -47,6 +54,7 @@ DEFAULT_CONFIG = {
             "delay_between_groups": 10,
             "delay_between_rooms": 10,
             "max_retries": 2,
+            "chong_trung": True,
             # Dữ liệu mẫu để người dùng thấy ngay cấu trúc: mỗi phân loại là
             # một danh sách link group. Tự thêm/sửa/xóa trong tab "Nhóm theo
             # phân loại" của giao diện.
@@ -98,6 +106,8 @@ def load_config():
         save_config(cfg)
 
     cfg.setdefault("profiles_dir", DEFAULT_CONFIG["profiles_dir"])
+    if not isinstance(cfg.get("schedules"), list):
+        cfg["schedules"] = []
     if not cfg.get("campaigns"):
         cfg["campaigns"] = json.loads(json.dumps(DEFAULT_CONFIG["campaigns"]))
 
@@ -140,12 +150,11 @@ def slug(name):
     return re.sub(r"[^a-z0-9]+", "_", s.replace("đ", "d")).strip("_") or "chien_dich"
 
 
-def new_campaign(name, dang_dung=()):
-    """Tạo cấu hình rỗng cho chiến dịch mới, đặt sẵn đường dẫn log theo tên.
+def duong_dan_log(name, dang_dung=()):
+    """Đường dẫn file chống đăng trùng cho một chiến dịch, không đụng file nào
+    đang được chiến dịch khác dùng.
 
-    `dang_dung` là các đường dẫn log đã bị chiến dịch khác chiếm — cần tránh vì
-    2 chiến dịch dùng chung file log sẽ coi bài của nhau là đã đăng. Cần thiết
-    vì bỏ dấu làm "Tuyển dụng" và "Tuyen dung" ra cùng một slug.
+    Cần thiết vì bỏ dấu làm "Tuyển dụng" và "Tuyen dung" ra cùng một slug.
     """
     base = slug(name)
     log_path = os.path.join(BASE_DIR, f"posted_log_{base}.json")
@@ -153,8 +162,50 @@ def new_campaign(name, dang_dung=()):
     while log_path in set(dang_dung):
         log_path = os.path.join(BASE_DIR, f"posted_log_{base}_{n}.json")
         n += 1
+    return log_path
 
+
+def bao_dam_log_rieng(cfg):
+    """Mỗi chiến dịch phải có file chống đăng trùng RIÊNG. Trả về list các
+    chiến dịch vừa phải đổi file: [(tên, file cũ, file mới), ...].
+
+    Dùng chung file là lỗi câm: khóa chống trùng chỉ gồm STT + link nhóm, nên
+    chiến dịch này coi bài của chiến dịch kia là đã đăng, và bài trùng STT
+    không bao giờ lên được.
+
+    Khi phải tách, chép nguyên nội dung file đang dùng chung sang file mới chứ
+    không tạo file rỗng: file rỗng nghĩa là "chưa đăng gì cả" và tool sẽ đăng
+    lại tất cả những bài vừa lên Facebook hôm nay. Mấy khóa thừa chép sang
+    cũng chỉ vướng đúng hôm nay, vì việc chặn tính theo ngày.
+    """
+    da_dung = {}
+    da_doi = []
+    for ten, camp in cfg["campaigns"].items():
+        cu = camp.get("posted_log") or ""
+        if cu and cu not in da_dung:
+            da_dung[cu] = ten
+            continue
+
+        moi = duong_dan_log(ten, da_dung.keys())
+        if cu and os.path.exists(cu):
+            try:
+                shutil.copy2(cu, moi)
+            except OSError:
+                pass        # không chép được thì thôi, vẫn hơn là dùng chung
+        camp["posted_log"] = moi
+        da_dung[moi] = ten
+        da_doi.append((ten, cu, moi))
+    return da_doi
+
+
+def new_campaign(name, dang_dung=()):
+    """Tạo cấu hình rỗng cho chiến dịch mới, đặt sẵn đường dẫn log theo tên.
+
+    `dang_dung` là các đường dẫn log đã bị chiến dịch khác chiếm — cần tránh vì
+    2 chiến dịch dùng chung file log sẽ coi bài của nhau là đã đăng.
+    """
+    base = slug(name)
     camp = json.loads(json.dumps(CAMPAIGN_DEFAULTS))
-    camp["posted_log"] = log_path
+    camp["posted_log"] = duong_dan_log(name, dang_dung)
     camp["images_dir"] = os.path.join(BASE_DIR, f"anh_{base}")
     return camp
