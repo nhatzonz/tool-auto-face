@@ -7,18 +7,25 @@ Làm việc theo "chiến dịch" — phòng trọ, tuyển dụng, seeding webs
 chiến dịch có file Excel, thư mục ảnh, file log và bản đồ nhóm riêng; nick
 Facebook dùng chung cho mọi chiến dịch.
 
-Ba tab:
+Các tab:
   - Tài khoản & Chạy   : chọn/thêm nick Facebook, bấm chạy, xem log trực tiếp
+  - Nội dung bài đăng  : sửa trực tiếp file Excel của chiến dịch
   - Dữ liệu chiến dịch : file Excel, thư mục ảnh, thư mục profile, các delay
   - Nhóm theo phân loại: thêm/sửa/xóa phân loại và danh sách link group
+  - Hẹn giờ đăng       : lịch tự chạy theo giờ Việt Nam (xem lich_hen.py)
 
 Việc đăng bài chạy trong thread riêng để giao diện không bị treo.
 """
+import json
 import os
 import queue
 import shutil
+import subprocess
+import sys
+import calendar
 import threading
 import tkinter as tk
+from datetime import date, datetime
 from tkinter import ttk, filedialog, messagebox
 
 import openpyxl
@@ -29,6 +36,7 @@ import paths
 paths.guard_missing_stdout()
 
 import config as cfg_module
+import lich_hen
 import post_phong_tro_fb as bot
 import tao_file_mau
 
@@ -40,6 +48,11 @@ class App(tk.Tk):
         self.geometry("960x700")
 
         self.cfg = cfg_module.load_config()
+        # Cấu hình cũ có thể còn 2 chiến dịch trỏ chung một file chống đăng
+        # trùng (trước đây không có gì chặn). Tách ra ngay lúc mở tool.
+        self.log_da_tach = cfg_module.bao_dam_log_rieng(self.cfg)
+        if self.log_da_tach:
+            cfg_module.save_config(self.cfg)
         self.log_queue = queue.Queue()      # worker thread → giao diện
         self.stop_event = threading.Event()
         self.worker = None
@@ -57,22 +70,40 @@ class App(tk.Tk):
         self.tab_data = ttk.Frame(notebook)
         self.tab_paths = ttk.Frame(notebook)
         self.tab_groups = ttk.Frame(notebook)
+        self.tab_lich = ttk.Frame(notebook)
         notebook.add(self.tab_run, text="  Tài khoản & Chạy  ")
         notebook.add(self.tab_data, text="  Nội dung bài đăng  ")
         notebook.add(self.tab_paths, text="  Dữ liệu chiến dịch  ")
         notebook.add(self.tab_groups, text="  Nhóm theo phân loại  ")
+        notebook.add(self.tab_lich, text="  ⏰ Hẹn giờ đăng  ")
 
         self._build_run_tab()
         self._build_data_tab()
         self._build_paths_tab()
         self._build_groups_tab()
+        self._build_lich_tab()
 
         self._tao_du_lieu_mau_lan_dau()
         self.load_campaign_into_views()
         self.refresh_accounts()
+        self.refresh_lich()
         self.after(100, self._drain_log_queue)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(50, self._hich_ve_lai)
+
+        # Windows tự mở tool lúc khởi động máy thì thu nhỏ ngay, đừng nhảy ra
+        # chắn màn hình người dùng khi họ vừa đăng nhập.
+        if lich_hen.mo_thu_nho():
+            self.iconify()
+
+        for ten, cu, moi in self.log_da_tach:
+            self.append_log(
+                f"⚠ Chiến dịch '{ten}' đang dùng chung file chống đăng trùng với "
+                f"chiến dịch khác ({cu or 'chưa đặt'}) — đã tách sang file riêng: "
+                f"{os.path.basename(moi)}")
+
+        self._nhip_dong_ho()
+        self.after(3000, self._vong_kiem_tra_lich)
 
     def _tao_du_lieu_mau_lan_dau(self):
         """Lần chạy đầu trên máy mới thì chưa có file Excel nào — tạo sẵn file
@@ -159,6 +190,7 @@ class App(tk.Tk):
         self.profiles_var.set(self.cfg["profiles_dir"])
         for key, var in self.num_vars.items():
             var.set(str(camp[key]))
+        self.chong_trung_var.set(bool(camp.get("chong_trung", True)))
 
         self.current_cat = None
         self.url_box.delete("1.0", "end")
@@ -198,7 +230,6 @@ class App(tk.Tk):
         if name in self.cfg["campaigns"]:
             messagebox.showinfo("Đã có", f"Chiến dịch '{name}' đã tồn tại.")
             return
-        import json
         copy = json.loads(json.dumps(self.campaign()))
         # Log riêng, nếu không 2 chiến dịch sẽ coi nhau là đã đăng
         dang_dung = [c["posted_log"] for c in self.cfg["campaigns"].values()]
@@ -224,8 +255,17 @@ class App(tk.Tk):
             (new if k == old else k): v for k, v in self.cfg["campaigns"].items()
         }
         self.cfg["active_campaign"] = new
+        # Lịch hẹn giờ nhớ chiến dịch theo TÊN. Quên đổi ở đây thì lịch trỏ vào
+        # một cái tên không còn tồn tại, và người dùng chỉ phát hiện ra vào lúc
+        # tới giờ mà chẳng có gì được đăng.
+        doi = [l for l in self.danh_sach_lich() if l.get("campaign") == old]
+        for l in doi:
+            l["campaign"] = new
         cfg_module.save_config(self.cfg)
         self.refresh_campaign_box()
+        self.refresh_lich()
+        if doi:
+            self.append_log(f"→ Đã cập nhật {len(doi)} lịch hẹn sang tên mới '{new}'.")
 
     def delete_campaign(self):
         if self.dang_chay():
@@ -234,18 +274,26 @@ class App(tk.Tk):
             messagebox.showwarning("Không xóa được", "Phải còn ít nhất 1 chiến dịch.")
             return
         name = self.cfg["active_campaign"]
+        lich_lien_quan = [l for l in self.danh_sach_lich() if l.get("campaign") == name]
+        canh_bao_lich = (
+            f"\n\n⚠ Có {len(lich_lien_quan)} lịch hẹn giờ đang dùng chiến dịch này, "
+            "sẽ bị xóa theo." if lich_lien_quan else "")
         if not messagebox.askyesno(
             "Xóa chiến dịch",
             f"Xóa chiến dịch '{name}' khỏi cấu hình?\n\n"
             "File Excel, ảnh và log trên ổ đĩa vẫn giữ nguyên, chỉ mất phần "
-            "khai báo đường dẫn và danh sách nhóm.",
+            "khai báo đường dẫn và danh sách nhóm." + canh_bao_lich,
         ):
             return
         self.cfg["campaigns"].pop(name)
+        # Lịch mồ côi không chạy được nữa, để lại chỉ tổ gây hiểu nhầm là còn hẹn
+        for l in lich_lien_quan:
+            self.danh_sach_lich().remove(l)
         self.cfg["active_campaign"] = next(iter(self.cfg["campaigns"]))
         cfg_module.save_config(self.cfg)
         self.refresh_campaign_box()
         self.load_campaign_into_views()
+        self.refresh_lich()
 
     # ==================== TAB: TÀI KHOẢN & CHẠY ====================
 
@@ -273,7 +321,13 @@ class App(tk.Tk):
         self.btn_stop.pack(side="left", padx=6)
         self.btn_check = ttk.Button(bar, text="🔍 Kiểm tra dữ liệu", command=self.kiem_tra)
         self.btn_check.pack(side="left", padx=(0, 6))
-        ttk.Button(bar, text="Xóa log", command=lambda: self.log_box.delete("1.0", "end")).pack(side="left")
+        # Tên nút phải nói rõ nó xóa cái gì: một nút chỉ dọn chữ trên màn hình,
+        # nút kia xóa file chống đăng trùng — nhầm cái thứ hai là cả loạt bài cũ
+        # lên Facebook lần nữa.
+        ttk.Button(bar, text="Xóa màn hình log",
+                   command=self.xoa_man_hinh_log).pack(side="left")
+        ttk.Button(bar, text="🗑 Xóa lịch sử đã đăng",
+                   command=self.xoa_lich_su_dang).pack(side="left", padx=6)
 
         self.status = ttk.Label(right, text="Sẵn sàng.")
         self.status.pack(anchor="w", pady=(0, 4))
@@ -368,7 +422,15 @@ class App(tk.Tk):
             messagebox.showwarning("Chưa chọn", "Hãy chọn một nick trong danh sách.")
             return
         name, path = acc
-        if not messagebox.askyesno("Xóa nick", f"Xóa hẳn profile '{name}'?\nSẽ mất cookie đăng nhập của nick này."):
+        lich_lien_quan = [l for l in self.danh_sach_lich() if l.get("nick") == name]
+        canh_bao_lich = (
+            f"\n\n⚠ Có {len(lich_lien_quan)} lịch hẹn giờ đang dùng nick này — "
+            "xóa xong các lịch đó sẽ không chạy được nữa, hãy sửa lại nick cho "
+            "chúng ở tab '⏰ Hẹn giờ đăng'." if lich_lien_quan else "")
+        if not messagebox.askyesno(
+            "Xóa nick",
+            f"Xóa hẳn profile '{name}'?\nSẽ mất cookie đăng nhập của nick này."
+            + canh_bao_lich):
             return
         shutil.rmtree(path, ignore_errors=True)
         self.refresh_accounts()
@@ -422,6 +484,12 @@ class App(tk.Tk):
                 "(xem chi tiết ở ô log).\n\nVẫn chạy?"):
                 return
 
+        self._khoi_dong_worker(nick, path, camp_name)
+
+    def _khoi_dong_worker(self, nick, path, camp_name, tu_lich=False):
+        """Nhả worker thread đăng bài. Dùng chung cho nút '▶ Bắt đầu đăng' và
+        cho lịch hẹn giờ tự kích hoạt — hai đường vào, một đường chạy."""
+        self.chay_tu_lich = tu_lich
         self.stop_event.clear()
         bot.reload_config(camp_name)
         bot.LOG_FN = self.log_queue.put
@@ -431,15 +499,52 @@ class App(tk.Tk):
         self.status.config(text=f"⏵ Đang chạy — chiến dịch '{camp_name}', nick: {nick}")
 
         def work():
+            stats = None
             try:
-                bot.run_posting(path, campaign=camp_name)
+                stats = bot.run_posting(path, campaign=camp_name)
             except Exception as e:
                 self.log_queue.put(f"✗ LỖI: {e}")
             finally:
-                self.log_queue.put(("__run_done__", None))
+                self.log_queue.put(("__run_done__", stats))
 
         self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
+
+    def xoa_man_hinh_log(self):
+        """Dọn chữ trong ô log. Không đụng dữ liệu, nhưng vẫn hỏi: log của lần
+        chạy vừa rồi là thứ duy nhất cho biết bài nào lỗi ở nhóm nào, xóa nhầm
+        là mất luôn, không xem lại được."""
+        if not self.log_box.get("1.0", "end").strip():
+            return
+        if not messagebox.askyesno(
+            "Xóa màn hình log",
+            "Xóa toàn bộ chữ đang hiện trong ô log?\n\n"
+            "Chỉ dọn màn hình, KHÔNG đụng tới lịch sử đã đăng. Nhưng nội dung "
+            "log của lần chạy vừa rồi sẽ không xem lại được."):
+            return
+        self.log_box.delete("1.0", "end")
+
+    def xoa_lich_su_dang(self):
+        """Mở cửa sổ chọn log của chiến dịch nào để xóa.
+
+        Mỗi chiến dịch có file chống đăng trùng riêng, nên phải cho chọn chứ
+        không mặc định xóa của chiến dịch đang mở — người dùng hay đứng ở chiến
+        dịch này mà muốn dọn log của chiến dịch kia.
+        """
+        if self.dang_chay():
+            return
+        XoaLichSuDang(self)
+
+    @staticmethod
+    def dem_luot_da_dang(duong_dan):
+        """Số lượt đã đăng ghi trong một file log; -1 nếu không đọc được."""
+        if not duong_dan or not os.path.exists(duong_dan):
+            return 0
+        try:
+            with open(duong_dan, "r", encoding="utf-8") as f:
+                return len(json.load(f))
+        except Exception:
+            return -1
 
     def request_stop(self):
         self.stop_event.set()
@@ -518,6 +623,26 @@ class App(tk.Tk):
 
     # ==================== LOG ====================
 
+    def _bao_da_dang_hom_nay(self, stats):
+        """Chạy xong mà có lượt bị chặn vì trùng thì nói rõ cho người dùng.
+
+        Chỉ hiện với lần chạy bấm tay. Lần chạy do lịch hẹn kích hoạt có thể
+        diễn ra lúc 3h sáng, dựng hộp thoại ở đó thì nó đứng nguyên tới sáng —
+        mà hộp thoại đang mở lại khiến các lịch sau bị hoãn theo.
+        """
+        if not stats or not stats.get("dup"):
+            return
+        if getattr(self, "chay_tu_lich", False):
+            return
+        messagebox.showinfo(
+            "Có bài không đăng vì trùng",
+            f"{stats['dup']} lượt không đăng vì HÔM NAY đã đăng bài đó lên "
+            "nhóm đó rồi — tính năng chống đăng trùng đang bật.\n\n"
+            "Muốn đăng lại ngay trong hôm nay, chọn một trong hai:\n"
+            "  • Bấm '🗑 Xóa lịch sử đã đăng' rồi chạy lại\n"
+            "  • Tắt ô 'Chống đăng trùng' ở tab 'Dữ liệu chiến dịch'\n\n"
+            "Để nguyên thì sang ngày mai các bài này lại đăng được bình thường.")
+
     def append_log(self, text):
         self.log_box.insert("end", text + "\n")
         self.log_box.see("end")
@@ -535,6 +660,7 @@ class App(tk.Tk):
                 if kind == "__run_done__":
                     self.set_ui_locked(False)
                     self.status.config(text="Đã dừng — giờ sửa được cấu hình.")
+                    self._bao_da_dang_hom_nay(payload)
                 elif kind == "__login_done__":
                     payload.destroy()
                     self.refresh_accounts()
@@ -556,6 +682,7 @@ class App(tk.Tk):
         ttk.Button(bar, text="+ Thêm bài", command=self.add_row).pack(side="left")
         ttk.Button(bar, text="Sửa bài", command=self.edit_row).pack(side="left", padx=4)
         ttk.Button(bar, text="Xóa bài", command=self.delete_row).pack(side="left")
+        ttk.Button(bar, text="🖼 Ảnh của bài này", command=self.quan_ly_anh).pack(side="left", padx=12)
         ttk.Button(bar, text="⟳ Tải lại từ Excel", command=self.load_excel).pack(side="left", padx=12)
         ttk.Button(bar, text="💾 Ghi vào file Excel", command=self.save_excel).pack(side="left")
 
@@ -601,6 +728,37 @@ class App(tk.Tk):
                 preview = preview[:90] + "..."
             self.data_tree.insert(
                 "", "end", values=(row["stt"], preview, row["phan_loai"], row["folder"]))
+
+    def quan_ly_anh(self):
+        """Mở cửa sổ xem/xóa/thêm ảnh cho thư mục ảnh của bài đang chọn."""
+        i = self.selected_row_index()
+        if i is None:
+            messagebox.showwarning("Chưa chọn", "Hãy chọn một bài trong bảng.")
+            return
+        row = self.excel_rows[i]
+        ten_thu_muc = (row.get("folder") or "").strip()
+        if not ten_thu_muc:
+            messagebox.showinfo(
+                "Bài này chưa có thư mục ảnh",
+                "Cột 'Thư mục ảnh' của bài đang trống nên không có ảnh nào để "
+                "quản lý.\n\nBấm 'Sửa bài' để đặt tên thư mục ảnh trước (ví dụ "
+                "'phong_501'), rồi quay lại đây.")
+            return
+
+        goc = self.campaign().get("images_dir") or ""
+        duong_dan = os.path.join(goc, ten_thu_muc)
+        if not os.path.isdir(duong_dan):
+            if not messagebox.askyesno(
+                "Chưa có thư mục",
+                f"Chưa có thư mục ảnh cho bài này:\n{duong_dan}\n\nTạo bây giờ?"):
+                return
+            try:
+                os.makedirs(duong_dan, exist_ok=True)
+            except Exception as e:
+                messagebox.showerror("Không tạo được", f"Không tạo được thư mục:\n{e}")
+                return
+
+        QuanLyAnh(self, duong_dan, f"STT {row['stt']} — {ten_thu_muc}")
 
     def next_stt(self):
         """STT trống tiếp theo — không đụng vào STT nào đã dùng."""
@@ -805,6 +963,18 @@ class App(tk.Tk):
             self.num_vars[key] = var
             ttk.Entry(f, textvariable=var, width=10).grid(row=r, column=1, sticky="w", padx=6)
 
+        self.chong_trung_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            f, text="Chống đăng trùng — không đăng lại bài đã lên nhóm đó trong cùng ngày",
+            variable=self.chong_trung_var,
+        ).grid(row=16, column=0, columnspan=3, sticky="w", padx=6, pady=(12, 2))
+        ttk.Label(
+            f,
+            text="Tắt ô này thì tool đăng bất chấp lịch sử — cùng bài có thể lên "
+                 "cùng nhóm nhiều lần trong ngày, Facebook rất dễ đánh dấu spam.",
+            foreground="#a05000", wraplength=560, justify="left",
+        ).grid(row=17, column=0, columnspan=3, sticky="w", padx=26, pady=(0, 4))
+
         ttk.Button(f, text="💾 Lưu cấu hình chiến dịch", command=self.save_paths) \
             .grid(row=20, column=0, sticky="w", padx=6, pady=16)
         f.columnconfigure(1, weight=1)
@@ -821,6 +991,24 @@ class App(tk.Tk):
         if self.dang_chay():
             return
         camp = self.campaign()
+
+        # Hai chiến dịch dùng chung file log = chiến dịch này coi bài của chiến
+        # dịch kia là đã đăng (khóa chống trùng chỉ gồm STT + link nhóm, không
+        # có tên chiến dịch). Hậu quả im lặng: bài trùng STT sẽ KHÔNG BAO GIỜ
+        # được đăng, mà log chỉ ghi "đã đăng hôm nay".
+        log_moi = self.path_vars["posted_log"].get().strip()
+        ten_hien_tai = self.cfg["active_campaign"]
+        for ten, c in self.cfg["campaigns"].items():
+            if ten != ten_hien_tai and log_moi and c.get("posted_log") == log_moi:
+                messagebox.showerror(
+                    "Trùng file lịch sử đăng",
+                    f"Chiến dịch '{ten}' đang dùng đúng file này làm 'File log "
+                    f"bài đã đăng':\n{log_moi}\n\n"
+                    "Hai chiến dịch dùng chung một file sẽ coi bài của nhau là "
+                    "đã đăng — bài trùng STT sẽ không bao giờ được đăng lên.\n\n"
+                    "Hãy chọn một file khác, ví dụ thêm đuôi tên chiến dịch.")
+                return
+
         for key, var in self.path_vars.items():
             camp[key] = var.get().strip()
         # Delay quá thấp là con đường nhanh nhất để bị Facebook khoá nick, nên
@@ -854,6 +1042,14 @@ class App(tk.Tk):
                 gia_tri = TRAN[key]
                 var.set(str(gia_tri))
             camp[key] = gia_tri
+        camp["chong_trung"] = self.chong_trung_var.get()
+        if not camp["chong_trung"]:
+            messagebox.showwarning(
+                "Đã tắt chống đăng trùng",
+                f"Chiến dịch '{self.cfg['active_campaign']}' sẽ đăng bất chấp "
+                "lịch sử: chạy bao nhiêu lần thì cùng một bài lên cùng một nhóm "
+                "bấy nhiêu lần.\n\nChỉ nên tắt tạm khi cần đăng lại gấp, xong "
+                "nhớ bật lại.")
         self.cfg["profiles_dir"] = self.profiles_var.get().strip()
         cfg_module.save_config(self.cfg)
         self.refresh_accounts()
@@ -966,6 +1162,333 @@ class App(tk.Tk):
         cfg_module.save_config(self.cfg)
         messagebox.showinfo("Đã lưu", f"Phân loại '{self.current_cat}': {len(urls)} group.")
 
+    # ==================== TAB: HẸN GIỜ ĐĂNG ====================
+
+    def _build_lich_tab(self):
+        f = self.tab_lich
+
+        note = ttk.LabelFrame(f, text="Cách hoạt động")
+        note.pack(fill="x", padx=4, pady=(6, 4))
+        ttk.Label(
+            note,
+            text="• Giờ hẹn tính theo giờ Việt Nam (UTC+7), không phụ thuộc múi giờ máy.\n"
+                 "• Đến giờ, máy phải đang bật và tool đang mở thì bài mới đăng được.\n"
+                 "• Mở tool muộn hơn giờ hẹn: tool sẽ hỏi lại bạn có chạy bù không.",
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=8)
+
+        dong_ho = ttk.Frame(f)
+        dong_ho.pack(fill="x", padx=4)
+        self.lbl_dong_ho = ttk.Label(dong_ho, text="", font=("Menlo", 12))
+        self.lbl_dong_ho.pack(side="left", pady=4)
+
+        self.tu_mo_var = tk.BooleanVar(value=lich_hen.dang_tu_mo())
+        self.chk_tu_mo = ttk.Checkbutton(
+            dong_ho, text="Tự mở tool khi bật máy (thu nhỏ sẵn)",
+            variable=self.tu_mo_var, command=self.doi_tu_mo)
+        self.chk_tu_mo.pack(side="right", pady=4)
+        if not lich_hen.ho_tro_tu_mo():
+            self.chk_tu_mo.config(state="disabled")
+
+        cot = ("bat", "lich", "camp", "nick", "ke_tiep", "chay_cuoi")
+        self.lich_tree = ttk.Treeview(f, columns=cot, show="headings", height=12)
+        for ma, ten, rong in (
+            ("bat", "Bật", 50), ("lich", "Lịch", 200), ("camp", "Chiến dịch", 150),
+            ("nick", "Nick", 130), ("ke_tiep", "Lần chạy tới", 140),
+            ("chay_cuoi", "Chạy gần nhất", 140),
+        ):
+            self.lich_tree.heading(ma, text=ten)
+            self.lich_tree.column(ma, width=rong, anchor="w")
+        self.lich_tree.pack(fill="both", expand=True, padx=4, pady=6)
+        self.lich_tree.bind("<Double-1>", lambda _e: self.sua_lich())
+
+        bar = ttk.Frame(f)
+        bar.pack(fill="x", padx=4, pady=(0, 8))
+        ttk.Button(bar, text="+ Thêm lịch", command=self.them_lich).pack(side="left")
+        ttk.Button(bar, text="Sửa", command=self.sua_lich).pack(side="left", padx=4)
+        ttk.Button(bar, text="Bật / Tắt", command=self.doi_bat_lich).pack(side="left", padx=4)
+        ttk.Button(bar, text="Xóa", command=self.xoa_lich).pack(side="left", padx=4)
+
+    def _nhip_dong_ho(self):
+        """Đồng hồ giờ Việt Nam, đập mỗi giây — để người dùng đối chiếu ngay
+        được giờ hẹn với giờ thật, khỏi phải đoán máy mình lệch múi giờ hay
+        không."""
+        bg = lich_hen.bay_gio()
+        self.lbl_dong_ho.config(
+            text=f"🕐 Giờ Việt Nam bây giờ: {bg.strftime('%H:%M:%S — %d/%m/%Y')}")
+        self.after(1000, self._nhip_dong_ho)
+
+    def danh_sach_lich(self):
+        """Danh sách lịch hẹn, đã chuẩn hóa và bảo đảm id không trùng.
+
+        Người dùng copy nguyên một khối lịch trong config.json để nhân đôi là
+        chuyện có thật; hai lịch cùng id sẽ làm bảng lịch ném TclError và hỏng
+        cả tab.
+        """
+        ds = self.cfg.setdefault("schedules", [])
+        da_gap = set()
+        for l in ds:
+            lich_hen.chuan_hoa(l)
+            if l["id"] in da_gap:
+                l["id"] = lich_hen.lich_moi()["id"]
+            da_gap.add(l["id"])
+        return ds
+
+    def refresh_lich(self):
+        """Vẽ lại bảng lịch từ cấu hình."""
+        if not hasattr(self, "lich_tree"):
+            return
+        self.lich_tree.delete(*self.lich_tree.get_children())
+        for l in self.danh_sach_lich():
+            ke_tiep = lich_hen.lan_ke_tiep(l) if l.get("bat") else None
+            self.lich_tree.insert("", "end", iid=l["id"], values=(
+                "✓" if l.get("bat") else "—",
+                lich_hen.mo_ta(l),
+                l.get("campaign") or "?",
+                l.get("nick") or "?",
+                lich_hen.mo_ta_moc(ke_tiep),
+                lich_hen.mo_ta_moc(l.get("lan_chay_cuoi")),
+            ))
+
+    def _lich_dang_chon(self):
+        sel = self.lich_tree.selection()
+        if not sel:
+            messagebox.showwarning("Chưa chọn", "Hãy chọn một lịch trong bảng.")
+            return None
+        return next((l for l in self.danh_sach_lich() if l["id"] == sel[0]), None)
+
+    def _luu_lich(self):
+        cfg_module.save_config(self.cfg)
+        self.refresh_lich()
+
+    def them_lich(self):
+        if self.dang_chay():
+            return
+        moi = LichEditor(self, "Thêm lịch hẹn", lich_hen.lich_moi(),
+                         list(self.cfg["campaigns"]), self.ten_cac_nick()).result
+        if moi:
+            self.danh_sach_lich().append(moi)
+            self._luu_lich()
+            self.append_log(f"⏰ Đã thêm lịch: {lich_hen.mo_ta(moi)} — {moi['campaign']} / {moi['nick']}")
+
+    def sua_lich(self):
+        if self.dang_chay():
+            return
+        l = self._lich_dang_chon()
+        if not l:
+            return
+        sua = LichEditor(self, "Sửa lịch hẹn", dict(l),
+                         list(self.cfg["campaigns"]), self.ten_cac_nick()).result
+        if sua:
+            # Đổi giờ giấc thì mốc đã xử lý của lịch cũ không còn ý nghĩa
+            sua["moc_da_xu_ly"] = ""
+            l.clear()
+            l.update(sua)
+            self._luu_lich()
+
+    def doi_bat_lich(self):
+        l = self._lich_dang_chon()
+        if not l:
+            return
+        l["bat"] = not l.get("bat")
+        # Bật lại một lịch cũ thì xóa dấu mốc đã xử lý, nếu không lịch sẽ im
+        # lặng bỏ qua đúng lần chạy gần nhất mà người dùng vừa mong đợi.
+        if l["bat"]:
+            l["moc_da_xu_ly"] = ""
+        self._luu_lich()
+
+    def xoa_lich(self):
+        l = self._lich_dang_chon()
+        if not l:
+            return
+        if not messagebox.askyesno("Xóa lịch", f"Xóa lịch '{lich_hen.mo_ta(l)}'?"):
+            return
+        self.danh_sach_lich().remove(l)
+        self._luu_lich()
+
+    def ten_cac_nick(self):
+        return [ten for ten, _ in bot.list_sessions()]
+
+    def doi_tu_mo(self):
+        try:
+            if self.tu_mo_var.get():
+                lich_hen.bat_tu_mo()
+                self.append_log("⏰ Đã bật: Windows sẽ tự mở tool khi khởi động máy.")
+            else:
+                lich_hen.tat_tu_mo()
+                self.append_log("⏰ Đã tắt tự mở tool khi bật máy.")
+        except Exception as e:
+            self.tu_mo_var.set(lich_hen.dang_tu_mo())
+            messagebox.showerror("Không đặt được", f"Không đổi được cài đặt tự mở:\n{e}")
+
+    # ==================== VÒNG LẶP KIỂM TRA LỊCH ====================
+
+    def _vong_kiem_tra_lich(self):
+        """Cứ 20 giây soát một lượt xem có lịch nào tới giờ chưa.
+
+        Dùng after() của Tk chứ không phải thread riêng: mọi thao tác đọc/ghi
+        cấu hình và dựng hộp thoại đều phải nằm ở main thread.
+        """
+        try:
+            self._soat_lich()
+        except Exception as e:
+            self.append_log(f"⏰ Lỗi khi soát lịch hẹn: {e}")
+        self.after(20000, self._vong_kiem_tra_lich)
+
+    def _soat_lich(self):
+        # Hộp thoại "chạy bù?" chạy vòng lặp sự kiện lồng nhau, after() vẫn nổ
+        # trong lúc nó mở — không có cờ này thì mỗi 20 giây lại chồng thêm một
+        # hộp thoại nữa lên màn hình.
+        if getattr(self, "_dang_hoi_lich", False):
+            return
+
+        # Đang bận thì hoãn lượt chứ không đánh dấu đã xử lý — soát lại sau 20
+        # giây. Người dùng đang gõ dở trong hộp thoại sửa bài mà lịch nổ thì
+        # set_ui_locked() khoá luôn nút Lưu của hộp thoại đó, họ kẹt giữa chừng
+        # không thoát ra được.
+        ban = None
+        if self.dang_khoa or (self.worker and self.worker.is_alive()):
+            ban = "đang có tiến trình chạy"
+        elif self._co_hop_thoai_dang_mo():
+            ban = "đang mở một hộp thoại"
+
+        bg = lich_hen.bay_gio()
+
+        if ban:
+            # Báo một lần cho mỗi mốc, nếu không thì cứ 20 giây một dòng log
+            da_bao = self.__dict__.setdefault("_da_bao_ban", set())
+            for l in self.danh_sach_lich():
+                lich_hen.chuan_hoa(l)
+                hanh_dong, moc = lich_hen.trang_thai(l, bg)
+                if hanh_dong in ("chay", "hoi") and (l["id"], moc) not in da_bao:
+                    da_bao.add((l["id"], moc))
+                    self.append_log(
+                        f"⏰ Lịch {lich_hen.mo_ta_moc(moc)} ({l['campaign']}) phải "
+                        f"chờ vì {ban} — sẽ chạy ngay khi xong.")
+            return
+        thay_doi = False
+        for l in list(self.danh_sach_lich()):
+            lich_hen.chuan_hoa(l)
+            hanh_dong, moc = lich_hen.trang_thai(l, bg)
+            if not hanh_dong:
+                continue
+
+            if hanh_dong == "qua_han":
+                lich_hen.danh_dau_da_xu_ly(l, moc)
+                l["bat"] = False        # chỉ xảy ra với lịch một lần, đã lỡ hẳn
+                self.append_log(
+                    f"⏰ Bỏ qua lịch {lich_hen.mo_ta_moc(moc)} ({l['campaign']}) — "
+                    "đã quá hạn quá lâu, không chạy bù. Lịch được tắt.")
+                thay_doi = True
+                continue
+
+            if hanh_dong == "hoi":
+                self._dang_hoi_lich = True
+                try:
+                    self.deiconify()
+                    self.lift()
+                    dong_y = messagebox.askyesno(
+                        "Lịch hẹn đã lỡ giờ",
+                        f"Lịch {lich_hen.mo_ta_moc(moc)} (chiến dịch "
+                        f"'{l['campaign']}', nick '{l['nick']}') đã tới giờ lúc "
+                        "tool chưa mở.\n\nChạy bù ngay bây giờ?")
+                finally:
+                    self._dang_hoi_lich = False
+                lich_hen.danh_dau_da_xu_ly(l, moc)
+                thay_doi = True
+                if not dong_y:
+                    self.append_log(f"⏰ Bạn đã bỏ qua lịch {lich_hen.mo_ta_moc(moc)}.")
+                    continue
+
+            # Tới đây là chạy: đúng giờ, hoặc người dùng đồng ý chạy bù.
+            # Chỉ ghi "đã chạy" khi thật sự khởi động được — bỏ lượt vì thiếu
+            # file hay sai nick mà vẫn ghi thì bảng lịch báo "chạy lúc 19:30"
+            # trong khi chẳng có bài nào lên.
+            chay_duoc = self._chay_theo_lich(l, moc)
+            lich_hen.danh_dau_da_xu_ly(l, moc, da_chay=chay_duoc)
+            # Lịch một lần thì mốc của nó đã trôi qua, có chạy được hay không
+            # cũng không bao giờ tới lượt nữa
+            if l.get("kieu") == "mot_lan":
+                l["bat"] = False
+            cfg_module.save_config(self.cfg)
+            self.refresh_lich()
+            return      # mỗi lượt chỉ khởi động một lần chạy
+
+        if thay_doi:
+            cfg_module.save_config(self.cfg)
+            self.refresh_lich()
+
+    def _co_hop_thoai_dang_mo(self):
+        """Có cửa sổ con nào (sửa bài, đăng nhập nick, sửa lịch) đang mở không."""
+        return any(
+            isinstance(w, tk.Toplevel) and w.winfo_exists() and w.winfo_viewable()
+            for w in self.winfo_children()
+        )
+
+    def _chay_theo_lich(self, l, moc):
+        """Khởi động một lần đăng do lịch hẹn kích hoạt.
+
+        Khác nút bấm tay ở chỗ: không dựng hộp thoại hỏi han. Đến giờ hẹn có
+        thể chẳng có ai ngồi trước máy, một hộp thoại chờ bấm OK sẽ treo cả
+        lượt chạy tới sáng hôm sau. Vướng gì thì ghi log rồi bỏ lượt.
+
+        Trả về True nếu đã khởi động được lần chạy.
+        """
+        camp_name, nick = l.get("campaign"), l.get("nick")
+
+        def bo_qua(ly_do):
+            self.append_log(f"⏰ Không chạy được lịch {lich_hen.mo_ta_moc(moc)}: {ly_do}")
+            return False
+
+        if camp_name not in self.cfg["campaigns"]:
+            return bo_qua(f"chiến dịch '{camp_name}' không còn tồn tại.")
+        path = os.path.join(self.cfg["profiles_dir"], nick or "")
+        if not nick or not os.path.isdir(path):
+            return bo_qua(f"không tìm thấy nick '{nick}' trong thư mục profile.")
+
+        camp = self.cfg["campaigns"][camp_name]
+        if not os.path.exists(camp["excel_path"]):
+            return bo_qua(f"thiếu file Excel: {camp['excel_path']}")
+        if not camp["groups"]:
+            return bo_qua(f"chiến dịch '{camp_name}' chưa khai báo nhóm nào.")
+
+        van_de = bot.kiem_tra_du_lieu(camp_name)
+        loi = [v for v in van_de if v["muc"] == "loi"]
+        if loi:
+            self.hien_van_de(van_de, camp_name)
+            return bo_qua(f"dữ liệu có {len(loi)} lỗi (xem chi tiết ở trên).")
+
+        # Kéo giao diện về đúng chiến dịch của lịch, để log và các tab đang
+        # hiện không nói một đằng còn worker chạy một nẻo.
+        #
+        # Trừ khi tab 'Nội dung bài đăng' đang có sửa chưa ghi vào Excel: nạp
+        # lại bảng sẽ nuốt sạch phần người dùng vừa gõ, mà họ không hề bấm gì
+        # cả. Bỏ việc chuyển giao diện đi thì lượt chạy vẫn đúng — worker đọc
+        # cấu hình theo tên chiến dịch từ file, không đọc từ các ô trên màn
+        # hình.
+        if self.cfg["active_campaign"] != camp_name:
+            if self.co_thay_doi_chua_luu():
+                self.append_log(
+                    f"⏰ Vẫn chạy chiến dịch '{camp_name}' theo lịch, nhưng giữ "
+                    "nguyên giao diện vì tab 'Nội dung bài đăng' đang có sửa "
+                    "chưa lưu — nhớ bấm 💾 Ghi vào file Excel.")
+            else:
+                self.cfg["active_campaign"] = camp_name
+                cfg_module.save_config(self.cfg)
+                self.refresh_campaign_box()
+                self.load_campaign_into_views()
+
+        ds_nick = self.acc_list.get(0, "end")
+        if nick in ds_nick:
+            self.acc_list.selection_clear(0, "end")
+            self.acc_list.selection_set(ds_nick.index(nick))
+
+        self.append_log(
+            f"⏰ Tới giờ hẹn {lich_hen.mo_ta_moc(moc)} — chạy chiến dịch "
+            f"'{camp_name}' bằng nick '{nick}'.")
+        self._khoi_dong_worker(nick, path, camp_name, tu_lich=True)
+        return True
+
     # ==================== ĐÓNG ====================
 
     def on_close(self):
@@ -1003,6 +1526,632 @@ class App(tk.Tk):
     def co_thay_doi_chua_luu(self):
         """So bảng hiện tại với lần nạp/ghi Excel gần nhất."""
         return self.excel_loaded and self.excel_rows != self.excel_snapshot
+
+
+class XoaLichSuDang(tk.Toplevel):
+    """Chọn file chống đăng trùng của (các) chiến dịch nào để xóa.
+
+    Xóa là thao tác một chiều và hậu quả nằm trên Facebook chứ không nằm trong
+    tool: xóa xong, lần chạy tới đăng lại toàn bộ bài lên mọi nhóm. Nên cửa sổ
+    này nói rõ từng chiến dịch có bao nhiêu lượt, và còn một lần hỏi nữa trước
+    khi xóa thật.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.app = parent
+        self.title("Xóa lịch sử đã đăng")
+        self.geometry("680x420")
+        self.transient(parent)
+        self.grab_set()
+
+        ttk.Label(
+            self,
+            text="Mỗi chiến dịch có một file lịch sử riêng. Chọn chiến dịch muốn "
+                 "xóa lịch sử (giữ Ctrl để chọn nhiều):",
+            wraplength=640, justify="left",
+        ).pack(anchor="w", padx=14, pady=(14, 6))
+
+        khung = ttk.Frame(self)
+        khung.pack(fill="both", expand=True, padx=14)
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", font=("Menlo", 11))
+        thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
+        self.danh_sach.configure(yscrollcommand=thanh.set)
+        thanh.pack(side="right", fill="y")
+        self.danh_sach.pack(fill="both", expand=True)
+
+        ttk.Label(
+            self,
+            text="Xóa xong, lần chạy tới tool sẽ đăng LẠI TỪ ĐẦU toàn bộ bài của "
+                 "chiến dịch đó lên mọi nhóm — kể cả bài đã lên Facebook rồi.",
+            foreground="#a05000", wraplength=640, justify="left",
+        ).pack(anchor="w", padx=14, pady=8)
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=14, pady=(0, 14))
+        ttk.Button(bar, text="🗑 Xóa lịch sử đã chọn", command=self.xoa).pack(side="left")
+        ttk.Button(bar, text="Đóng", command=self.destroy).pack(side="right")
+
+        self.nap_lai()
+        parent.wait_window(self)
+
+    def nap_lai(self):
+        self.ten_chien_dich = list(self.app.cfg["campaigns"])
+        dang_chon = self.app.cfg["active_campaign"]
+        self.danh_sach.delete(0, "end")
+        for i, ten in enumerate(self.ten_chien_dich):
+            duong_dan = self.app.cfg["campaigns"][ten].get("posted_log") or ""
+            n = self.app.dem_luot_da_dang(duong_dan)
+            mo_ta = "không đọc được file" if n < 0 else f"{n} lượt đã đăng"
+            self.danh_sach.insert(
+                "end", f"{ten}  —  {mo_ta}  —  {os.path.basename(duong_dan) or '(chưa đặt)'}")
+            if ten == dang_chon:
+                self.danh_sach.selection_set(i)
+
+    def xoa(self):
+        chon = [self.ten_chien_dich[i] for i in self.danh_sach.curselection()]
+        if not chon:
+            messagebox.showwarning(
+                "Chưa chọn", "Hãy chọn ít nhất một chiến dịch.", parent=self)
+            return
+
+        dong = []
+        tong = 0
+        for ten in chon:
+            duong_dan = self.app.cfg["campaigns"][ten].get("posted_log") or ""
+            n = self.app.dem_luot_da_dang(duong_dan)
+            tong += max(n, 0)
+            dong.append(f"  • {ten}: {max(n, 0)} lượt")
+
+        if not tong:
+            messagebox.showinfo(
+                "Chưa có gì để xóa",
+                "Các chiến dịch đã chọn chưa ghi nhận lượt đăng nào.", parent=self)
+            return
+
+        if not messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Xóa lịch sử đã đăng của {len(chon)} chiến dịch?\n\n"
+            + "\n".join(dong)
+            + f"\n\nTổng cộng {tong} lượt sẽ bị xóa.\n\n"
+            "Lần chạy tới các bài này sẽ được đăng LẠI lên Facebook.\n"
+            "Không hoàn tác được.", parent=self):
+            return
+
+        for ten in chon:
+            duong_dan = self.app.cfg["campaigns"][ten].get("posted_log") or ""
+            try:
+                with open(duong_dan, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+            except Exception as e:
+                messagebox.showerror(
+                    "Không xóa được", f"Chiến dịch '{ten}':\n{e}", parent=self)
+                continue
+            self.app.append_log(f"🗑 Đã xóa lịch sử đã đăng của chiến dịch '{ten}'.")
+
+        self.nap_lai()
+
+
+class QuanLyAnh(tk.Toplevel):
+    """Xem, xóa, thêm ảnh trong thư mục ảnh của một bài.
+
+    Sinh ra để khỏi phải mở Explorer mỗi lần thay ảnh: chọn ảnh cũ xóa đi, thư
+    mục vẫn còn nguyên để thả ảnh mới vào. Không bao giờ xóa chính thư mục —
+    xóa mất là cột 'Thư mục ảnh' trong Excel trỏ vào chỗ trống.
+    """
+
+    DUOI_ANH = (".jpg", ".jpeg", ".png", ".webp")
+
+    def __init__(self, parent, thu_muc, nhan):
+        super().__init__(parent)
+        self.thu_muc = thu_muc
+        self.title(f"Ảnh: {nhan}")
+        self.geometry("640x520")
+        self.transient(parent)
+        self.grab_set()
+
+        ttk.Label(self, text=thu_muc, foreground="#555").pack(
+            anchor="w", padx=14, pady=(12, 2))
+
+        self.tom_tat = ttk.Label(self, text="")
+        self.tom_tat.pack(anchor="w", padx=14)
+        self.canh_bao = ttk.Label(self, text="", foreground="#a05000",
+                                  wraplength=600, justify="left")
+        self.canh_bao.pack(anchor="w", padx=14, pady=(2, 6))
+
+        khung = ttk.Frame(self)
+        khung.pack(fill="both", expand=True, padx=14)
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", font=("Menlo", 11))
+        thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
+        self.danh_sach.configure(yscrollcommand=thanh.set)
+        thanh.pack(side="right", fill="y")
+        self.danh_sach.pack(fill="both", expand=True)
+        self.danh_sach.bind("<Double-1>", lambda _e: self.xem_anh())
+
+        ttk.Label(
+            self,
+            text="Giữ Ctrl (hoặc Shift) để chọn nhiều ảnh. Bấm đúp để xem ảnh.",
+            foreground="#777",
+        ).pack(anchor="w", padx=14, pady=(4, 0))
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=14, pady=12)
+        ttk.Button(bar, text="+ Thêm ảnh...", command=self.them_anh).pack(side="left")
+        ttk.Button(bar, text="Xóa ảnh đã chọn", command=self.xoa_da_chon).pack(side="left", padx=4)
+        ttk.Button(bar, text="Xóa tất cả ảnh", command=self.xoa_tat_ca).pack(side="left")
+        ttk.Button(bar, text="Mở thư mục", command=self.mo_thu_muc).pack(side="left", padx=12)
+        ttk.Button(bar, text="Đóng", command=self.destroy).pack(side="right")
+
+        self.nap_lai()
+        parent.wait_window(self)
+
+    # ---------- đọc thư mục ----------
+
+    def _quet(self):
+        """Trả về (ảnh dùng được, file không dùng được) trong thư mục."""
+        try:
+            ten = sorted(os.listdir(self.thu_muc))
+        except OSError:
+            return [], []
+        anh, khac = [], []
+        for t in ten:
+            if not os.path.isfile(os.path.join(self.thu_muc, t)):
+                continue
+            (anh if t.lower().endswith(self.DUOI_ANH) else khac).append(t)
+        return anh, khac
+
+    @staticmethod
+    def _co(duong_dan):
+        try:
+            n = os.path.getsize(duong_dan)
+        except OSError:
+            return "?"
+        return f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+
+    def nap_lai(self):
+        anh, khac = self._quet()
+        self.anh = anh
+        self.danh_sach.delete(0, "end")
+        tong = 0
+        for ten in anh:
+            dd = os.path.join(self.thu_muc, ten)
+            try:
+                tong += os.path.getsize(dd)
+            except OSError:
+                pass
+            self.danh_sach.insert("end", f"{ten}    ({self._co(dd)})")
+
+        if anh:
+            self.tom_tat.config(
+                text=f"{len(anh)} ảnh — tổng {tong / 1024 / 1024:.1f} MB")
+        else:
+            self.tom_tat.config(text="Thư mục trống — chưa có ảnh nào.")
+
+        # File .heic của iPhone hay lọt vào qua Zalo mà Facebook không nhận;
+        # không báo thì người dùng tưởng đã có ảnh, tới lúc đăng mới thấy trống.
+        if khac:
+            self.canh_bao.config(
+                text=f"⚠ {len(khac)} file KHÔNG dùng để đăng được "
+                     f"({', '.join(khac[:4])}{'...' if len(khac) > 4 else ''}) — "
+                     "tool chỉ nhận .jpg .jpeg .png .webp")
+        else:
+            self.canh_bao.config(text="")
+
+    def _dang_chon(self):
+        return [self.anh[i] for i in self.danh_sach.curselection()]
+
+    # ---------- thao tác ----------
+
+    def them_anh(self):
+        chon = filedialog.askopenfilenames(
+            parent=self, title="Chọn ảnh để thêm vào thư mục này",
+            filetypes=[("Ảnh", "*.jpg *.jpeg *.png *.webp"), ("Tất cả", "*.*")])
+        if not chon:
+            return
+        them = bo_qua = 0
+        for nguon in chon:
+            ten = os.path.basename(nguon)
+            dich = os.path.join(self.thu_muc, ten)
+            # Trùng tên thì thêm hậu tố chứ không đè — hai ảnh khác nhau từ Zalo
+            # rất hay cùng tên kiểu "photo_2026.jpg"
+            goc, duoi = os.path.splitext(ten)
+            n = 1
+            while os.path.exists(dich):
+                dich = os.path.join(self.thu_muc, f"{goc}_{n}{duoi}")
+                n += 1
+            try:
+                shutil.copy2(nguon, dich)
+                them += 1
+            except Exception as e:
+                bo_qua += 1
+                messagebox.showerror("Không chép được", f"{ten}:\n{e}", parent=self)
+        self.nap_lai()
+        if them:
+            self.master.append_log(f"🖼 Đã thêm {them} ảnh vào {self.thu_muc}")
+
+    def xoa_da_chon(self):
+        chon = self._dang_chon()
+        if not chon:
+            messagebox.showwarning(
+                "Chưa chọn", "Hãy chọn ảnh muốn xóa trong danh sách.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Xóa ảnh",
+            f"Xóa hẳn {len(chon)} ảnh khỏi ổ đĩa?\n\n"
+            "Không vào Thùng rác, không hoàn tác được.\n"
+            "Thư mục vẫn giữ nguyên để bạn bỏ ảnh mới vào.", parent=self):
+            return
+        self._xoa(chon)
+
+    def xoa_tat_ca(self):
+        if not self.anh:
+            messagebox.showinfo("Trống", "Thư mục chưa có ảnh nào.", parent=self)
+            return
+        if not messagebox.askyesno(
+            "Xóa tất cả ảnh",
+            f"Xóa hẳn toàn bộ {len(self.anh)} ảnh trong thư mục này?\n\n"
+            "Không vào Thùng rác, không hoàn tác được.\n"
+            "Thư mục vẫn giữ nguyên để bạn bỏ ảnh mới vào.", parent=self):
+            return
+        self._xoa(list(self.anh))
+
+    def _xoa(self, ten_file):
+        xoa = 0
+        for ten in ten_file:
+            try:
+                os.remove(os.path.join(self.thu_muc, ten))
+                xoa += 1
+            except Exception as e:
+                messagebox.showerror("Không xóa được", f"{ten}:\n{e}", parent=self)
+        self.nap_lai()
+        if xoa:
+            self.master.append_log(f"🖼 Đã xóa {xoa} ảnh trong {self.thu_muc}")
+
+    def xem_anh(self):
+        chon = self._dang_chon()
+        if chon:
+            self._mo(os.path.join(self.thu_muc, chon[0]))
+
+    def mo_thu_muc(self):
+        self._mo(self.thu_muc)
+
+    def _mo(self, duong_dan):
+        """Mở file/thư mục bằng ứng dụng mặc định của hệ điều hành."""
+        try:
+            if sys.platform == "win32":
+                os.startfile(duong_dan)
+            else:
+                subprocess.run(["open" if sys.platform == "darwin" else "xdg-open",
+                                duong_dan], check=False)
+        except Exception as e:
+            messagebox.showerror("Không mở được", str(e), parent=self)
+
+
+class _Popup(tk.Toplevel):
+    """Phần chung của các popup chọn: bám dưới nút bấm, Esc để đóng."""
+
+    def __init__(self, parent, tieu_de, neo):
+        super().__init__(parent)
+        self.title(tieu_de)
+        self.result = None
+        self.transient(parent)
+        self.resizable(False, False)
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    def _bam_vao(self, neo, parent):
+        """Đặt popup ngay dưới nút vừa bấm cho khỏi che ô đang nhập."""
+        self.update_idletasks()
+        if neo is not None and neo.winfo_ismapped():
+            x, y = neo.winfo_rootx(), neo.winfo_rooty() + neo.winfo_height() + 2
+        else:
+            x = parent.winfo_rootx() + 60
+            y = parent.winfo_rooty() + 60
+        # Không cho tràn khỏi màn hình
+        x = max(0, min(x, self.winfo_screenwidth() - self.winfo_width() - 8))
+        y = max(0, min(y, self.winfo_screenheight() - self.winfo_height() - 8))
+        self.geometry(f"+{x}+{y}")
+        self.grab_set()
+        parent.wait_window(self)
+
+
+class ChonGio(_Popup):
+    """Popup chọn giờ và phút. Chọn xong, self.result là chuỗi HH:MM."""
+
+    def __init__(self, parent, gio_hien_tai="", neo=None):
+        super().__init__(parent, "Chọn giờ", neo)
+
+        gio, phut = self._tach(gio_hien_tai)
+
+        khung = ttk.Frame(self)
+        khung.pack(padx=12, pady=(10, 6))
+        self.ds_gio = self._cot(khung, 0, "Giờ", 24, gio)
+        ttk.Label(khung, text=":", font=("", 16)).grid(row=1, column=1, padx=6)
+        self.ds_phut = self._cot(khung, 2, "Phút", 60, phut)
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=(0, 10))
+        ttk.Button(bar, text="Chọn", command=self.ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
+
+        self._bam_vao(neo, parent)
+
+    @staticmethod
+    def _tach(gio_hien_tai):
+        """"19:30" → (19, 30). Ô đang trống hoặc gõ sai thì lấy 19:30."""
+        try:
+            g, p = gio_hien_tai.strip().split(":")
+            g, p = int(g), int(p)
+            if 0 <= g <= 23 and 0 <= p <= 59:
+                return g, p
+        except (ValueError, AttributeError):
+            pass
+        return 19, 30
+
+    def _cot(self, khung, cot, nhan, so_muc, dang_chon):
+        ttk.Label(khung, text=nhan).grid(row=0, column=cot)
+        hop = ttk.Frame(khung)
+        hop.grid(row=1, column=cot)
+        thanh = ttk.Scrollbar(hop, orient="vertical")
+        ds = tk.Listbox(hop, height=8, width=4, exportselection=False,
+                        font=("", 13), yscrollcommand=thanh.set)
+        thanh.config(command=ds.yview)
+        ds.pack(side="left")
+        thanh.pack(side="left", fill="y")
+        for i in range(so_muc):
+            ds.insert("end", f"{i:02d}")
+        ds.selection_set(dang_chon)
+        # Kéo mục đang chọn ra giữa khung cho dễ nhìn
+        ds.see(min(so_muc - 1, dang_chon + 4))
+        ds.see(max(0, dang_chon - 3))
+        ds.bind("<Double-Button-1>", lambda _e: self.ok())
+        return ds
+
+    @staticmethod
+    def _dang_chon(ds):
+        chon = ds.curselection()
+        return int(ds.get(chon[0])) if chon else 0
+
+    def ok(self):
+        self.result = "{:02d}:{:02d}".format(
+            self._dang_chon(self.ds_gio), self._dang_chon(self.ds_phut))
+        self.destroy()
+
+
+class ChonNgay(_Popup):
+    """Popup lịch tháng. Chọn xong, self.result là chuỗi dd/mm/yyyy."""
+
+    TEN_THU_NGAN = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+
+    def __init__(self, parent, ngay_hien_tai="", neo=None):
+        super().__init__(parent, "Chọn ngày", neo)
+
+        self.hom_nay = lich_hen.bay_gio().date()
+        self.dang_chon = self._doc(ngay_hien_tai) or self.hom_nay
+        self.nam, self.thang = self.dang_chon.year, self.dang_chon.month
+
+        dieu_huong = ttk.Frame(self)
+        dieu_huong.pack(fill="x", padx=10, pady=(10, 4))
+        ttk.Button(dieu_huong, text="◀", width=3,
+                   command=lambda: self._doi_thang(-1)).pack(side="left")
+        self.nhan_thang = ttk.Label(dieu_huong, anchor="center", font=("", 13, "bold"))
+        self.nhan_thang.pack(side="left", expand=True, fill="x")
+        ttk.Button(dieu_huong, text="▶", width=3,
+                   command=lambda: self._doi_thang(1)).pack(side="left")
+
+        self.luoi = ttk.Frame(self)
+        self.luoi.pack(padx=10)
+        for i, ten in enumerate(self.TEN_THU_NGAN):
+            ttk.Label(self.luoi, text=ten, width=4, anchor="center",
+                      foreground="#c0392b" if i == 6 else "#333").grid(row=0, column=i, pady=2)
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=8)
+        ttk.Button(bar, text="Hôm nay", command=self._ve_hom_nay).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
+
+        self._ve_thang()
+        self._bam_vao(neo, parent)
+
+    @staticmethod
+    def _doc(chuoi):
+        try:
+            return datetime.strptime(chuoi.strip(), "%d/%m/%Y").date()
+        except (ValueError, AttributeError):
+            return None
+
+    def _doi_thang(self, buoc):
+        thang = self.thang + buoc
+        self.nam += (thang - 1) // 12
+        self.thang = (thang - 1) % 12 + 1
+        self._ve_thang()
+
+    def _ve_hom_nay(self):
+        self._chon(self.hom_nay)
+
+    def _ve_thang(self):
+        """Vẽ lại lưới ngày của tháng đang xem."""
+        self.nhan_thang.config(text=f"Tháng {self.thang}/{self.nam}")
+        for o in self.luoi.grid_slaves():
+            if int(o.grid_info()["row"]) > 0:
+                o.destroy()
+
+        for dong, tuan in enumerate(calendar.Calendar().monthdayscalendar(self.nam, self.thang), 1):
+            for cot, ngay in enumerate(tuan):
+                if ngay == 0:
+                    continue
+                d = date(self.nam, self.thang, ngay)
+                nut = tk.Button(self.luoi, text=str(ngay), width=3, relief="flat",
+                                command=lambda d=d: self._chon(d))
+                if d == self.dang_chon:
+                    nut.config(bg="#2d7ff9", fg="white", relief="raised")
+                elif d == self.hom_nay:
+                    nut.config(fg="#2d7ff9", font=("", 12, "bold"))
+                elif d < self.hom_nay:
+                    # Ngày đã qua thì làm mờ — chọn vào cũng không chạy được
+                    nut.config(fg="#aaa")
+                nut.grid(row=dong, column=cot, padx=1, pady=1)
+
+    def _chon(self, d):
+        self.result = d.strftime("%d/%m/%Y")
+        self.destroy()
+
+
+class LichEditor(tk.Toplevel):
+    """Hộp thoại tạo/sửa một lịch hẹn giờ đăng."""
+
+    def __init__(self, parent, title, lich, campaigns=(), nicks=()):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("560x460")
+        self.result = None
+        self.lich = lich_hen.chuan_hoa(dict(lich))
+        self.transient(parent)
+        self.grab_set()
+
+        bg = lich_hen.bay_gio()
+
+        khung = ttk.Frame(self)
+        khung.pack(fill="both", expand=True, padx=16, pady=14)
+
+        ttk.Label(khung, text="Kiểu hẹn:").grid(row=0, column=0, sticky="w", pady=6)
+        self.kieu_var = tk.StringVar(value=self.lich["kieu"])
+        hop_kieu = ttk.Frame(khung)
+        hop_kieu.grid(row=0, column=1, sticky="w")
+        ttk.Radiobutton(hop_kieu, text="Một lần", value="mot_lan",
+                        variable=self.kieu_var, command=self._doi_kieu).pack(side="left")
+        ttk.Radiobutton(hop_kieu, text="Lặp lại theo thứ", value="hang_ngay",
+                        variable=self.kieu_var, command=self._doi_kieu).pack(side="left", padx=12)
+
+        ttk.Label(khung, text="Giờ (giờ VN):").grid(row=1, column=0, sticky="w", pady=6)
+        self.gio_var = tk.StringVar(value=self.lich["gio"] or "19:30")
+        hop_gio = ttk.Frame(khung)
+        hop_gio.grid(row=1, column=1, sticky="w")
+        ttk.Entry(hop_gio, textvariable=self.gio_var, width=10).pack(side="left")
+        self.nut_gio = ttk.Button(hop_gio, text="🕒", width=3, command=self._mo_chon_gio)
+        self.nut_gio.pack(side="left", padx=4)
+        ttk.Label(khung, text="bấm 🕒 để chọn, hoặc gõ dạng HH:MM",
+                  foreground="#777").grid(row=1, column=2, sticky="w", padx=8)
+
+        ttk.Label(khung, text="Ngày:").grid(row=2, column=0, sticky="w", pady=6)
+        self.ngay_var = tk.StringVar(
+            value=self._ngay_hien_thi(self.lich["ngay"]) or bg.strftime("%d/%m/%Y"))
+        hop_ngay = ttk.Frame(khung)
+        hop_ngay.grid(row=2, column=1, sticky="w")
+        self.o_ngay = ttk.Entry(hop_ngay, textvariable=self.ngay_var, width=10)
+        self.o_ngay.pack(side="left")
+        self.nut_ngay = ttk.Button(hop_ngay, text="📅", width=3, command=self._mo_chon_ngay)
+        self.nut_ngay.pack(side="left", padx=4)
+        self.ghi_chu_ngay = ttk.Label(khung, text="bấm 📅 để chọn, hoặc gõ ngày/tháng/năm",
+                                      foreground="#777")
+        self.ghi_chu_ngay.grid(row=2, column=2, sticky="w", padx=8)
+
+        self.khung_thu = ttk.LabelFrame(khung, text="Lặp vào các thứ (không chọn gì = mọi ngày)")
+        self.khung_thu.grid(row=3, column=0, columnspan=3, sticky="ew", pady=10)
+        self.thu_vars = []
+        for i, ten in enumerate(lich_hen.TEN_THU):
+            v = tk.BooleanVar(value=i in (self.lich["thu"] or []))
+            ttk.Checkbutton(self.khung_thu, text=ten, variable=v).grid(
+                row=i // 4, column=i % 4, sticky="w", padx=8, pady=3)
+            self.thu_vars.append(v)
+
+        ttk.Label(khung, text="Chiến dịch:").grid(row=4, column=0, sticky="w", pady=6)
+        self.camp_var = tk.StringVar(
+            value=self.lich["campaign"] or (campaigns[0] if campaigns else ""))
+        ttk.Combobox(khung, textvariable=self.camp_var, values=list(campaigns),
+                     state="readonly", width=28).grid(row=4, column=1, columnspan=2, sticky="w")
+
+        ttk.Label(khung, text="Nick Facebook:").grid(row=5, column=0, sticky="w", pady=6)
+        self.nick_var = tk.StringVar(
+            value=self.lich["nick"] or (nicks[0] if nicks else ""))
+        ttk.Combobox(khung, textvariable=self.nick_var, values=list(nicks),
+                     state="readonly", width=28).grid(row=5, column=1, columnspan=2, sticky="w")
+
+        self.bat_var = tk.BooleanVar(value=self.lich["bat"])
+        ttk.Checkbutton(khung, text="Bật lịch này", variable=self.bat_var).grid(
+            row=6, column=1, sticky="w", pady=8)
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=(0, 14))
+        ttk.Button(bar, text="Lưu", command=self.ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
+
+        self._doi_kieu()
+        parent.wait_window(self)
+
+    @staticmethod
+    def _ngay_hien_thi(iso):
+        """ISO trong config (YYYY-MM-DD) → dd/mm/yyyy cho người Việt đọc."""
+        try:
+            return datetime.strptime(iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            return ""
+
+    def _mo_chon_gio(self):
+        pop = ChonGio(self, self.gio_var.get(), neo=self.nut_gio)
+        if pop.result:
+            self.gio_var.set(pop.result)
+
+    def _mo_chon_ngay(self):
+        pop = ChonNgay(self, self.ngay_var.get(), neo=self.nut_ngay)
+        if pop.result:
+            self.ngay_var.set(pop.result)
+
+    def _doi_kieu(self):
+        """Ẩn/hiện ô Ngày và bảng Thứ theo kiểu hẹn đang chọn."""
+        mot_lan = self.kieu_var.get() == "mot_lan"
+        for w in (self.o_ngay, self.nut_ngay, self.ghi_chu_ngay):
+            w.configure(state="normal" if mot_lan else "disabled")
+        for con in self.khung_thu.winfo_children():
+            con.configure(state="disabled" if mot_lan else "normal")
+
+    def ok(self):
+        gio = self.gio_var.get().strip()
+        if not lich_hen.gio_hop_le(gio):
+            messagebox.showwarning(
+                "Giờ không hợp lệ",
+                "Giờ phải theo dạng HH:MM, vd 08:00 hoặc 19:30.", parent=self)
+            return
+
+        if not self.camp_var.get():
+            messagebox.showwarning("Thiếu chiến dịch", "Hãy chọn chiến dịch.", parent=self)
+            return
+        if not self.nick_var.get():
+            messagebox.showwarning(
+                "Thiếu nick",
+                "Hãy chọn nick Facebook.\nChưa có nick nào thì thêm ở tab "
+                "'Tài khoản & Chạy' trước.", parent=self)
+            return
+
+        l = dict(self.lich)
+        l.update({
+            "kieu": self.kieu_var.get(),
+            "gio": gio,
+            "campaign": self.camp_var.get(),
+            "nick": self.nick_var.get(),
+            "bat": self.bat_var.get(),
+            "thu": [i for i, v in enumerate(self.thu_vars) if v.get()],
+        })
+
+        if l["kieu"] == "mot_lan":
+            try:
+                ngay = datetime.strptime(self.ngay_var.get().strip(), "%d/%m/%Y")
+            except ValueError:
+                messagebox.showwarning(
+                    "Ngày không hợp lệ",
+                    "Ngày phải theo dạng ngày/tháng/năm, vd 25/07/2026.", parent=self)
+                return
+            l["ngay"] = ngay.strftime("%Y-%m-%d")
+            if l["bat"] and lich_hen.lan_ke_tiep(l) is None:
+                messagebox.showwarning(
+                    "Mốc đã qua",
+                    "Ngày giờ bạn chọn nằm trong quá khứ nên lịch sẽ không bao "
+                    "giờ chạy. Hãy chọn mốc trong tương lai.", parent=self)
+                return
+        else:
+            l["ngay"] = ""
+
+        self.result = l
+        self.destroy()
 
 
 class RowEditor(tk.Toplevel):
