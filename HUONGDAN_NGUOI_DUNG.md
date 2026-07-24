@@ -12,12 +12,13 @@ Windows. Không cần cài Python, không cần biết lập trình.
 6. [Bước 3 — Soạn nội dung bài](#6-bước-3--soạn-nội-dung-bài)
 7. [Bước 4 — Chuẩn bị ảnh](#7-bước-4--chuẩn-bị-ảnh)
 8. [Bước 5 — Kiểm tra và chạy](#8-bước-5--kiểm-tra-và-chạy)
-9. [Hẹn giờ đăng tự động](#9-hẹn-giờ-đăng-tự-động)
-10. [Hạn chế rủi ro khóa tài khoản](#10-hạn-chế-rủi-ro-khóa-tài-khoản)
-11. [Lỗi thường gặp](#11-lỗi-thường-gặp)
-12. [Tách dữ liệu ra thư mục riêng](#12-tách-dữ-liệu-ra-thư-mục-riêng--nên-làm-ngay-từ-đầu)
-13. [Nhận bản cập nhật](#13-nhận-bản-cập-nhật)
-14. [Sao lưu và chuyển máy](#14-sao-lưu-và-chuyển-máy)
+9. [Tham gia nhóm tự động](#9-tham-gia-nhóm-tự-động)
+10. [Hẹn giờ đăng tự động](#10-hẹn-giờ-đăng-tự-động)
+11. [Hạn chế rủi ro khóa tài khoản](#11-hạn-chế-rủi-ro-khóa-tài-khoản)
+12. [Lỗi thường gặp](#12-lỗi-thường-gặp)
+13. [Tách dữ liệu ra thư mục riêng](#13-tách-dữ-liệu-ra-thư-mục-riêng--nên-làm-ngay-từ-đầu)
+14. [Nhận bản cập nhật](#14-nhận-bản-cập-nhật)
+15. [Sao lưu và chuyển máy](#15-sao-lưu-và-chuyển-máy)
 
 ---
 
@@ -58,14 +59,14 @@ Ngay lần chạy đầu, tool tự tạo sẵn cạnh file .exe những thứ s
 
 > 💡 Bốn thứ dưới cùng bảng là **dữ liệu của bạn**, không phải của tool. Nên
 > chuyển chúng sang một thư mục riêng để sau này nhận bản cập nhật không bị mất
-> — xem [mục 12](#12-tách-dữ-liệu-ra-thư-mục-riêng--nên-làm-ngay-từ-đầu). Làm
+> — xem [mục 13](#13-tách-dữ-liệu-ra-thư-mục-riêng--nên-làm-ngay-từ-đầu). Làm
 > ngay bây giờ cũng được, mà dùng quen rồi làm cũng không sao.
 
 ---
 
 ## 3. Làm quen giao diện
 
-Tool có 5 tab ở trên cùng:
+Tool có 6 tab ở trên cùng:
 
 | Tab | Dùng để |
 |---|---|
@@ -73,7 +74,8 @@ Tool có 5 tab ở trên cùng:
 | **Nội dung bài đăng** | Xem và sửa nội dung bài ngay trong tool |
 | **Dữ liệu chiến dịch** | Đường dẫn file, chỉnh thời gian chờ giữa các bài/nhóm |
 | **Nhóm theo phân loại** | Khai danh sách link nhóm cho từng phân loại |
-| **⏰ Hẹn giờ đăng** | Đặt lịch để tool tự đăng đúng giờ (xem mục 9) |
+| **⏰ Hẹn giờ đăng** | Đặt lịch để tool tự đăng đúng giờ (xem mục 10) |
+| **👥 Tham gia nhóm** | Cho nick vào nhóm — chạy riêng, không dính việc đăng bài (xem mục 9) |
 
 Góc trên có ô **Chiến dịch** — mỗi chiến dịch (phòng trọ, tuyển dụng,
 seeding...) có nội dung, ảnh, nhóm riêng, nhưng dùng chung các nick Facebook.
@@ -247,7 +249,118 @@ nhiêu lần.
 
 ---
 
-## 9. Hẹn giờ đăng tự động
+## 9. Tham gia nhóm tự động
+
+Nick chỉ đăng được vào nhóm mà nó **đã là thành viên**. Việc cho nick vào nhóm
+nằm ở tab riêng **👥 Tham gia nhóm**, chạy tách hẳn khỏi việc đăng bài: nút
+riêng, danh sách nhóm riêng, log riêng. Bấm đăng bài thì tool không bao giờ tự
+đi xin vào nhóm, và ngược lại.
+
+**Các bước:**
+
+1. Chọn **nick** ở cột trái — lịch sử tham gia nhóm ghi theo từng nick, nên
+   bảng bên phải hiện đúng trạng thái của nick đó.
+2. Bấm **+ Dán link nhóm** rồi dán danh sách, mỗi dòng một link. Đã khai nhóm ở
+   tab "Nhóm theo phân loại" rồi thì bấm **Nạp từ chiến dịch...** cho khỏi gõ
+   lại — nó chỉ **chép sang một lần**, sau đó hai bên độc lập.
+3. Bấm **▶ Tham gia tất cả nhóm chưa vào** để chạy cả danh sách — tool tự bỏ
+   qua nhóm đã vào rồi.
+
+Muốn nhắm riêng vài nhóm thì **tick chúng lại** rồi bấm **▶ Tham gia nhóm đã
+tick**:
+
+| Thao tác | Kết quả |
+|---|---|
+| Bấm vào **bất kỳ đâu trên dòng** | Tick / bỏ tick dòng đó |
+| Bôi đen nhiều dòng rồi nhấn **Space** | Tick cả loạt |
+| Bấm chữ **✓ trên tiêu đề cột** | Tick hết, bấm lần nữa thì bỏ hết |
+| Nút **☑ Tick hết** / **☐ Bỏ tick** | Như trên |
+
+Ô tick giữ nguyên khi bạn đổi nick hay khi bảng vẽ lại, chỉ mất khi tắt tool.
+
+**Lấy link ra dùng:** bấm chọn dòng rồi bấm **📋 Sao chép link** (hoặc Ctrl+C /
+Cmd+C, hoặc chuột phải → *Sao chép link*). Chọn nhiều dòng thì chép nhiều link,
+mỗi link một dòng. Chuột phải còn có *Mở nhóm trong trình duyệt* để xem thử
+nhóm đó bằng tay.
+
+Nút **Xóa nhóm đã tick** chạy theo mấy ô ✓ này (chỉ xóa khỏi danh sách, không
+rời nhóm trên Facebook).
+
+Cột "Trạng thái" cho biết với nick đang chọn thì nhóm đó *Chưa xử lý / Đã là
+thành viên / Đang chờ duyệt / Không vào được / Bấm rồi nhưng chưa rõ*. Nhóm đã
+xong thì lần chạy sau tool không mở lại nữa; nhóm hỏng thì hẹn ngày thử lại.
+
+Dòng chữ cạnh các nút cho biết còn bao nhiêu nhóm cần xử lý, hôm nay nick đã
+bấm mấy lượt, và báo đỏ nếu nick đang bị tạm nghỉ hoặc đang ngoài khung giờ.
+
+### ⚠ Việc này rủi ro hơn đăng bài
+
+Nói thẳng: **tự động tham gia nhóm dễ bị Facebook chặn hơn tự động đăng bài.**
+Facebook đếm số lượt xin vào nhóm theo từng nick, theo ngày, và nhìn cả nhịp
+thao tác. Không có cách nào làm việc này mà an toàn tuyệt đối — chỉ giảm rủi ro
+được thôi.
+
+Vì thế tool cố tình chạy **chậm**, và mặc định đã là mức nên dùng:
+
+| Cài đặt | Mặc định | Chỉnh được tới |
+|---|---|---|
+| Tối đa mỗi lần chạy | 5 nhóm | 15 |
+| Tối đa mỗi nick mỗi ngày | 8 nhóm | 20 |
+| Nghỉ giữa 2 nhóm | 90–300 giây | không xuống dưới 40s |
+| Nghỉ dài | 20 phút sau mỗi 3 nhóm | ít nhất 5 phút |
+| Khung giờ chạy | 8h–22h giờ VN | 0h–24h |
+
+> Cột bên phải là **giới hạn kỹ thuật, không phải mức an toàn.** Càng chạy gần
+> mức đó thì nhịp thao tác càng dày và càng dễ bị chặn. Nick đang dùng để đăng
+> bài thật thì nên giữ quanh 10 nhóm/lần, 12 nhóm/ngày, nghỉ từ 60s trở lên.
+
+Trần ngày tính **cả các lần chạy trước trong ngày**, nên bấm chạy lại nhiều lần
+không lách được. Đặt số ngoài khoảng an toàn thì tool tự kéo về và báo cho bạn.
+
+Tick ô **"Nick mới lập"** cho nick vừa tạo: mọi con số bị ép xuống còn 2
+nhóm/lần, 3 nhóm/ngày, nghỉ 3–10 phút — và không nâng lên được cho tới khi bạn
+bỏ tick.
+
+**Ngoài mấy con số trên, tool còn:**
+
+- **Xáo thứ tự nhóm** mỗi lần chạy, không đi tuần tự theo danh sách.
+- **Xem trang 3–7 giây, cuộn vài nhịp** rồi mới bấm Tham gia.
+- **Thỉnh thoảng ghé bảng tin** giữa hai nhóm — một phiên chỉ toàn mở nhóm rồi
+  bấm là dấu vết rất dễ nhận.
+- **Không chạy ngoài khung giờ** — xin vào nhóm lúc 3h sáng thì người thật đang ngủ.
+- **Kiểm chứng sau mỗi cú bấm**: nút phải đổi sang "Đã yêu cầu" hoặc vào hẳn
+  nhóm. Nếu bấm mà nút không đổi **2 lần liên tiếp** thì gần như chắc chắn
+  Facebook đang chặn ngầm → dừng ngay.
+
+### Khi tool khoá nick lại
+
+Gặp checkpoint, gặp thông báo "tạm thời bị chặn", hoặc bấm 2 lần không ăn thua,
+tool **dừng và khoá việc tham gia nhóm của nick đó 24 tiếng**. Trong 24 tiếng
+đó bấm chạy là bị từ chối ngay, kèm mốc giờ hết hạn.
+
+Đây là bảo vệ, không phải lỗi. **Chạy tiếp ngay sau khi bị chặn là cách nhanh
+nhất để mất nick.** Nút *"Bỏ tạm nghỉ của nick"* có sẵn nếu bạn chắc chắn là
+báo nhầm — nhưng bỏ rồi thì tự chịu.
+
+### Vài điều nữa
+
+Phần lớn nhóm **phải chờ quản trị viên duyệt**, có nhóm còn bắt trả lời câu
+hỏi. Tool **không tự trả lời câu hỏi hộ** — trả lời bừa là bị từ chối vĩnh
+viễn, sau đó vào bằng tay cũng khó.
+
+Nhóm không vào được (link hỏng, nhóm đã xóa, nhóm hỏi câu hỏi) được ghi lại và
+**7 ngày sau mới thử lại**, để mỗi lần chạy tool không mở đi mở lại mấy link
+chết.
+
+**Thấy trạng thái không khớp với thực tế?** Ví dụ bảng ghi "Đã là thành viên"
+nhưng bạn vào Facebook kiểm tra thì chưa hề tham gia. Bấm **🔄 Soát lại trạng
+thái** — nút này bỏ đi những bản ghi mà tool *tự nhìn trang rồi kết luận* (giữ
+lại các nhóm tool thật sự đã bấm tham gia), đưa chúng về "chưa xử lý" để lần
+chạy tới kiểm tra lại từ đầu.
+
+---
+
+## 10. Hẹn giờ đăng tự động
 
 Vào tab **⏰ Hẹn giờ đăng**, bấm **+ Thêm lịch**. Có 2 kiểu:
 
@@ -280,7 +393,7 @@ thể chẳng có ai ngồi trước máy.
 
 ---
 
-## 10. Hạn chế rủi ro khóa tài khoản
+## 11. Hạn chế rủi ro khóa tài khoản
 
 Facebook chống công cụ tự động. Rủi ro là có thật, **không thể loại bỏ hoàn
 toàn, chỉ giảm được.** Dùng **tài khoản phụ, không dùng tài khoản chính.**
@@ -294,7 +407,10 @@ Xếp theo mức độ quan trọng:
    chữ, đổi ảnh, đổi thứ tự.
 3. **Nick mới phải "làm nóng".** Nick vừa lập đừng đăng ngay. Vài ngày đầu chỉ
    like, bình luận, kết bạn, đăng 1–2 bài. Tăng dần lên.
-4. **Nhiều nick trên một máy.** Mỗi nick là một profile riêng (tool tự tách khi
+4. **Xin vào nhóm hàng loạt.** Vào vài chục nhóm trong một buổi là dấu hiệu
+   Facebook bắt rất nhanh — nick mới càng dễ dính. Xem mục
+   [Tham gia nhóm tự động](#9-tham-gia-nhóm-tự-động) và giữ trần mỗi ngày thấp.
+5. **Nhiều nick trên một máy.** Mỗi nick là một profile riêng (tool tự tách khi
    bấm "+ Thêm nick mới"). Đừng chạy 2 nick cùng lúc — giãn nhau vài giờ. Làm
    nghiêm túc thì mỗi nick một mạng: một nick wifi, một nick 4G điện thoại.
 
@@ -304,7 +420,7 @@ Xếp theo mức độ quan trọng:
 
 ---
 
-## 11. Lỗi thường gặp
+## 12. Lỗi thường gặp
 
 | Hiện tượng | Cách xử lý |
 |---|---|
@@ -312,13 +428,15 @@ Xếp theo mức độ quan trọng:
 | `⚠ Chưa có file: ...xlsx` | File Excel bị xóa/đổi chỗ. Vào tab "Dữ liệu chiến dịch" chỉ lại đường dẫn |
 | Không đọc được Excel | Đang mở file đó trong Excel. Đóng lại rồi bấm ⟳ Tải lại từ Excel |
 | Sửa nội dung rồi mà chạy vẫn ra bài cũ | Chưa bấm **💾 Ghi vào file Excel** sau khi sửa |
-| Báo nhóm không đăng được | Nick chưa tham gia nhóm đó, hoặc nhóm bắt duyệt bài. Kiểm tra bằng tay |
+| Báo nhóm không đăng được | Nick chưa tham gia nhóm đó, hoặc nhóm bắt duyệt bài. Dùng tab **👥 Tham gia nhóm** hoặc kiểm tra bằng tay |
+| Tab Tham gia nhóm báo `không thấy nút tham gia` | Link nhóm hỏng/nhóm đã xóa, hoặc nhóm bắt trả lời câu hỏi trước khi vào — phải vào bằng tay |
+| Tham gia nhóm dừng giữa chừng, báo bị chặn tạm thời | **Nghỉ vài ngày**, đừng chạy lại ngay. Sau đó hạ 'Tối đa mỗi nick mỗi ngày' xuống |
 | Bị đòi đăng nhập lại liên tục | Thư mục `fb_profiles\` bị xóa, hoặc tool đang nằm trong `C:\Program Files` (không ghi được) |
 | Đăng vài bài rồi dừng, báo checkpoint | Facebook đã cảnh báo nick. **Dừng ngay**, mở Facebook đăng nhập bằng tay giải quyết, nghỉ vài ngày rồi tăng thời gian chờ lên |
 
 ---
 
-## 12. Tách dữ liệu ra thư mục riêng — **nên làm ngay từ đầu**
+## 13. Tách dữ liệu ra thư mục riêng — **nên làm ngay từ đầu**
 
 Mặc định mọi thứ nằm chung trong thư mục tool: cả code lẫn dữ liệu của bạn.
 
@@ -373,13 +491,13 @@ trỏ đúng.
 
 `config.json` là ngoại lệ duy nhất: **nó bắt buộc phải nằm cạnh file .exe**,
 không trỏ đi nơi khác được. Nhưng nó chỉ là một file nhỏ, và giờ nó chẳng chứa
-gì ngoài đường dẫn với danh sách nhóm — copy tay một cái là xong (mục 13).
+gì ngoài đường dẫn với danh sách nhóm — copy tay một cái là xong (mục 14).
 
 Cho chắc, copy sẵn một bản dự phòng vào `D:\DuLieuTool\` luôn.
 
 ---
 
-## 13. Nhận bản cập nhật
+## 14. Nhận bản cập nhật
 
 Khi được gửi bản mới:
 
@@ -394,14 +512,14 @@ Khi được gửi bản mới:
 Toàn bộ nhóm, nội dung, ảnh, phiên đăng nhập giữ nguyên vì chúng nằm ở
 `D:\DuLieuTool\`, bản cập nhật không hề đụng tới.
 
-> **Chưa làm mục 12?** Vậy thì bước 2 phải copy ra **tất cả**: `config.json`,
+> **Chưa làm mục 13?** Vậy thì bước 2 phải copy ra **tất cả**: `config.json`,
 > `fb_profiles\`, các file `.xlsx`, các thư mục ảnh, các file `posted_log*.json`
 > — rồi bước 5 copy ngược lại hết. Sót một thứ là mất thứ đó. Đây đúng là lý do
-> nên làm mục 12.
+> nên làm mục 13.
 
 ---
 
-## 14. Sao lưu và chuyển máy
+## 15. Sao lưu và chuyển máy
 
 **Sao lưu:** copy thư mục `D:\DuLieuTool\` sang USB hoặc Google Drive, thỉnh
 thoảng làm lại. Máy hỏng là mất hết nếu không có bản sao. Thư mục tool thì
@@ -412,6 +530,6 @@ không cần sao lưu — hỏng thì xin lại file zip là xong.
 lại đường dẫn — nếu để thư mục dữ liệu ở vị trí khác trên máy mới thì phải trỏ
 lại, vì tool lưu đường dẫn đầy đủ chứ không tự dò.
 
-> Lưu ý mục 10: chuyển nick sang máy khác là đổi thiết bị đột ngột dưới mắt
+> Lưu ý mục 11: chuyển nick sang máy khác là đổi thiết bị đột ngột dưới mắt
 > Facebook. Đổi cả máy lẫn mạng cùng lúc thì khả năng bị hỏi xác minh khá cao —
 > nên đăng nhập lại bằng tay một lần trên máy mới trước khi chạy tool.

@@ -19,6 +19,7 @@ import random
 import unicodedata
 import re
 from datetime import datetime
+from urllib.parse import urlparse
 import openpyxl
 from playwright.sync_api import sync_playwright
 
@@ -41,6 +42,10 @@ CAMPAIGN_NAME = ""
 GROUPS = {}
 MAX_POSTS = DELAY_BETWEEN_GROUPS = DELAY_BETWEEN_ROOMS = MAX_RETRIES = 0
 CHONG_TRUNG = True
+
+# Việc cho nick vào nhóm nằm ở auto_join.py, chạy riêng ở tab "Tham gia nhóm".
+# File này chỉ lo đăng bài: nick chưa vào nhóm thì lượt đăng đó báo lỗi, không
+# tự đi xin vào nhóm giữa lúc đang đăng.
 
 
 def reload_config(campaign=None):
@@ -137,6 +142,47 @@ def mark_posted(posted, stt, group_url):
     key = f"{stt}|{group_url}"
     posted[key] = lich_hen.bay_gio().strftime("%Y-%m-%d %H:%M:%S")
     save_posted_log(posted)
+
+
+# ======================== CHECKPOINT ========================
+# auto_join.py dùng lại đúng 2 thứ dưới đây — nhận biết checkpoint là chuyện
+# của trình duyệt, không phải của việc đăng bài.
+
+
+class FacebookCheckpointError(Exception):
+    """Facebook chặn lại đòi xác minh danh tính (checkpoint).
+
+    Gặp cái này thì mọi thao tác sau đều vô nghĩa và càng thử càng nặng, nên
+    tool dừng hẳn để người dùng tự mở Chrome xác minh.
+    """
+
+
+# Đường dẫn của các trang xác minh. So khớp theo ĐÚNG đoạn đường dẫn, không tìm
+# chuỗi con trong cả URL: nhóm tên "recoveryhouse" hay "disabledveterans" có
+# chứa "recover"/"disabled" trong link, tìm chuỗi con sẽ dừng cả lượt đăng chỉ
+# vì cái tên nhóm.
+DUONG_DAN_CHECKPOINT = (
+    "/checkpoint",
+    "/login/checkpoint",
+    "/recover",
+    "/two_factor",
+    "/disabled",
+)
+
+
+def kiem_tra_checkpoint(page):
+    """Ném FacebookCheckpointError nếu Facebook đã đá sang trang xác minh.
+
+    Chỉ soi URL, không dò chữ trên trang: bài đăng cho thuê phòng hay có chữ
+    "xác minh", dò chữ sẽ dừng nhầm giữa lúc mọi thứ vẫn bình thường.
+    """
+    duong_dan = urlparse(page.url or "").path.lower().rstrip("/")
+    if any(duong_dan == p or duong_dan.startswith(p + "/") for p in DUONG_DAN_CHECKPOINT):
+        raise FacebookCheckpointError(
+            "Facebook đang yêu cầu xác minh tài khoản (checkpoint). "
+            "Hãy mở Chrome bằng nút 'Đăng nhập lại nick này', xác minh xong "
+            "rồi chạy lại tool."
+        )
 
 
 # ======================== ĐỌC DỮ LIỆU ========================
@@ -742,6 +788,7 @@ def post_to_group(page, group_url, content, images):
     log(f"  Đang mở group: {group_url}")
     page.goto(group_url, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(3000)
+    kiem_tra_checkpoint(page)
 
     # Click vào ô "Bạn viết gì đi..." để mở popup tạo bài
     log(f"  Mở ô viết bài...")
@@ -814,6 +861,8 @@ def post_to_group(page, group_url, content, images):
 def run_posting(profile_dir, confirm_nick=None, campaign=None):
     """Chạy toàn bộ vòng đăng bài của một chiến dịch với profile đã chọn.
 
+    Chỉ đăng bài. Việc cho nick vào nhóm nằm ở auto_join.py, chạy riêng.
+
     Không gọi input() ở đâu cả nên dùng được cho cả CLI lẫn GUI.
     `confirm_nick(ten_nick) -> bool`: hỏi lại người dùng có đúng nick không
     (CLI truyền hàm hỏi qua terminal, GUI truyền None vì đã chọn nick sẵn).
@@ -831,11 +880,9 @@ def run_posting(profile_dir, confirm_nick=None, campaign=None):
 
     batch = items[:MAX_POSTS] if MAX_POSTS > 0 else items
 
-    # Tính tổng số bài sẽ đăng
     total_posts = 0
     for item in batch:
-        urls = get_group_urls(item["phan_loai"])
-        total_posts += len(urls)
+        total_posts += len(get_group_urls(item["phan_loai"]))
 
     log(f"Sẽ đăng {len(batch)} mục → ~{total_posts} lượt đăng (theo thứ tự STT)")
     log(f"{'=' * 60}")
@@ -866,6 +913,10 @@ def run_posting(profile_dir, confirm_nick=None, campaign=None):
             stats = _post_all(page, batch, posted, total_posts)
         except StopRequested:
             log("⏹ Đã dừng theo yêu cầu.")
+            stats = None
+        except FacebookCheckpointError as e:
+            log(f"⛔ {e}")
+            log("Tool dừng hẳn, không tự thử lại — thử tiếp lúc này chỉ làm nick nặng thêm.")
             stats = None
         finally:
             # Cookie đã tự lưu trong profile, chỉ cần đóng
@@ -916,6 +967,10 @@ def _post_all(page, batch, posted, total_posts):
                 for attempt in range(1, MAX_RETRIES + 1):
                     try:
                         post_to_group(page, group_url, content, item["images"])
+                    except FacebookCheckpointError:
+                        # Không tính là lỗi đăng bài để retry: thử lại lúc
+                        # Facebook đang đòi xác minh chỉ làm nick nặng thêm.
+                        raise
                     except Exception as e:
                         loi_cuoi = str(e).split(chr(10))[0][:200]
                         log(f"  ✗ LỖI (lần {attempt}/{MAX_RETRIES}): {e}")
@@ -998,7 +1053,10 @@ def choose_campaign():
 
 
 def main():
-    """Chạy bằng terminal: chọn chiến dịch, chọn acc, rồi đăng."""
+    """Chạy bằng terminal: chọn chiến dịch, chọn acc, rồi đăng.
+
+    Muốn cho nick vào nhóm thì chạy file riêng: python auto_join.py
+    """
     campaign = choose_campaign()
     reload_config(campaign)
     profile_dir = choose_account()

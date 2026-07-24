@@ -44,6 +44,10 @@ DEFAULT_CONFIG = {
     # Lịch hẹn giờ đăng bài — xem lich_hen.py. Để ở gốc chứ không nằm trong
     # từng chiến dịch vì một lịch tự chọn lấy chiến dịch và nick của nó.
     "schedules": [],
+    # Tính năng tham gia nhóm — xem auto_join.py. Cũng để ở gốc: cho nick vào
+    # nhóm là việc của cái nick, không thuộc chiến dịch nào, và chạy hoàn toàn
+    # tách khỏi việc đăng bài.
+    "auto_join": {},
     "campaigns": {
         "Phòng trọ": {
             "excel_path": os.path.join(BASE_DIR, "phong_tro.xlsx"),
@@ -108,6 +112,8 @@ def load_config():
     cfg.setdefault("profiles_dir", DEFAULT_CONFIG["profiles_dir"])
     if not isinstance(cfg.get("schedules"), list):
         cfg["schedules"] = []
+    if not isinstance(cfg.get("auto_join"), dict):
+        cfg["auto_join"] = {}
     if not cfg.get("campaigns"):
         cfg["campaigns"] = json.loads(json.dumps(DEFAULT_CONFIG["campaigns"]))
 

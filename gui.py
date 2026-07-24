@@ -13,6 +13,8 @@ Các tab:
   - Dữ liệu chiến dịch : file Excel, thư mục ảnh, thư mục profile, các delay
   - Nhóm theo phân loại: thêm/sửa/xóa phân loại và danh sách link group
   - Hẹn giờ đăng       : lịch tự chạy theo giờ Việt Nam (xem lich_hen.py)
+  - Tham gia nhóm      : cho nick vào nhóm, chạy tách hẳn khỏi việc đăng bài
+                         (xem auto_join.py) — danh sách nhóm và lịch sử riêng
 
 Việc đăng bài chạy trong thread riêng để giao diện không bị treo.
 """
@@ -23,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import calendar
+import webbrowser
 import threading
 import tkinter as tk
 from datetime import date, datetime
@@ -35,6 +38,7 @@ import paths
 # Phải gọi trước khi import các module có print() ở cấp module
 paths.guard_missing_stdout()
 
+import auto_join as joiner
 import config as cfg_module
 import lich_hen
 import post_phong_tro_fb as bot
@@ -53,13 +57,17 @@ class App(tk.Tk):
         self.log_da_tach = cfg_module.bao_dam_log_rieng(self.cfg)
         if self.log_da_tach:
             cfg_module.save_config(self.cfg)
-        self.log_queue = queue.Queue()      # worker thread → giao diện
+        self.log_queue = queue.Queue()      # worker đăng bài → giao diện
+        # Việc tham gia nhóm có ô log riêng ở tab riêng, nên có hàng đợi riêng:
+        # trộn chung thì log của hai việc khác hẳn nhau đổ lẫn vào một chỗ.
+        self.join_log_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.worker = None
         self.current_cat = None             # phân loại đang chọn ở tab Nhóm
         self.dang_khoa = False              # True khi đang đăng → cấm sửa
         self.excel_loaded = False
         self.excel_snapshot = []            # ảnh chụp lần nạp/ghi Excel gần nhất
+        self.join_da_tick = set()           # link nhóm đang tick ở tab Tham gia nhóm
 
         self._build_campaign_bar()
 
@@ -71,22 +79,26 @@ class App(tk.Tk):
         self.tab_paths = ttk.Frame(notebook)
         self.tab_groups = ttk.Frame(notebook)
         self.tab_lich = ttk.Frame(notebook)
+        self.tab_join = ttk.Frame(notebook)
         notebook.add(self.tab_run, text="  Tài khoản & Chạy  ")
         notebook.add(self.tab_data, text="  Nội dung bài đăng  ")
         notebook.add(self.tab_paths, text="  Dữ liệu chiến dịch  ")
         notebook.add(self.tab_groups, text="  Nhóm theo phân loại  ")
         notebook.add(self.tab_lich, text="  ⏰ Hẹn giờ đăng  ")
+        notebook.add(self.tab_join, text="  👥 Tham gia nhóm  ")
 
         self._build_run_tab()
         self._build_data_tab()
         self._build_paths_tab()
         self._build_groups_tab()
         self._build_lich_tab()
+        self._build_join_tab()
 
         self._tao_du_lieu_mau_lan_dau()
         self.load_campaign_into_views()
         self.refresh_accounts()
         self.refresh_lich()
+        self.refresh_join_nicks()
         self.after(100, self._drain_log_queue)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(50, self._hich_ve_lai)
@@ -145,9 +157,9 @@ class App(tk.Tk):
         if self.dang_khoa or (self.worker and self.worker.is_alive()):
             messagebox.showwarning(
                 "Đang chạy",
-                "Đang đăng bài. Bấm '■ Dừng' và chờ dừng hẳn rồi mới sửa được "
-                "cấu hình — sửa giữa chừng sẽ làm bài đang chạy ghi log sai "
-                "chiến dịch.")
+                "Đang có tiến trình chạy. Bấm '■ Dừng' và chờ dừng hẳn rồi mới "
+                "sửa được cấu hình — sửa giữa chừng sẽ làm việc đang chạy đọc "
+                "nhầm cấu hình.")
             return True
         return False
 
@@ -434,6 +446,7 @@ class App(tk.Tk):
             return
         shutil.rmtree(path, ignore_errors=True)
         self.refresh_accounts()
+        self.refresh_join_nicks()
         self.append_log(f"Đã xóa nick '{name}'.")
 
     # ==================== CHẠY ĐĂNG BÀI ====================
@@ -450,18 +463,19 @@ class App(tk.Tk):
 
         camp_name = self.cfg["active_campaign"]
         camp = self.campaign()
-        if not os.path.exists(camp["excel_path"]):
-            messagebox.showerror(
-                "Thiếu file",
-                f"Chiến dịch '{camp_name}' chưa có file Excel hợp lệ:\n{camp['excel_path']}\n\n"
-                "Vào tab 'Dữ liệu chiến dịch' để chọn file.",
-            )
-            return
         if not camp["groups"]:
             messagebox.showerror(
                 "Chưa có nhóm",
                 f"Chiến dịch '{camp_name}' chưa khai báo nhóm nào.\n"
                 "Vào tab 'Nhóm theo phân loại' để thêm.",
+            )
+            return
+
+        if not os.path.exists(camp["excel_path"]):
+            messagebox.showerror(
+                "Thiếu file",
+                f"Chiến dịch '{camp_name}' chưa có file Excel hợp lệ:\n{camp['excel_path']}\n\n"
+                "Vào tab 'Dữ liệu chiến dịch' để chọn file.",
             )
             return
 
@@ -547,9 +561,12 @@ class App(tk.Tk):
             return -1
 
     def request_stop(self):
+        """Dừng việc đang chạy — dùng chung cho cả đăng bài lẫn tham gia nhóm,
+        vì hai việc không bao giờ chạy cùng lúc (chung một worker thread)."""
         self.stop_event.set()
         self.btn_stop.config(state="disabled")
-        self.status.config(text="⏸ Đang dừng... chờ bài hiện tại đăng xong rồi mới nhả khoá.")
+        self.btn_join_stop.config(state="disabled")
+        self.status.config(text="⏸ Đang dừng... chờ việc hiện tại xong rồi mới nhả khoá.")
 
     def set_ui_locked(self, khoa):
         """Khoá/mở toàn bộ phần sửa cấu hình.
@@ -564,7 +581,7 @@ class App(tk.Tk):
         def duyet(widget):
             for con in widget.winfo_children():
                 # Nút Dừng phải luôn bấm được, nếu không sẽ không dừng nổi
-                if con in (self.btn_stop,):
+                if con in (self.btn_stop, self.btn_join_stop):
                     continue
                 if isinstance(con, (ttk.Button, ttk.Entry, tk.Listbox, tk.Text, ttk.Combobox)):
                     try:
@@ -579,8 +596,11 @@ class App(tk.Tk):
             self.campaign_box.config(state="readonly")
         self.btn_start.config(state="disabled" if khoa else "normal")
         self.btn_stop.config(state="normal" if khoa else "disabled")
-        # Ô log luôn xem được
+        # Hai ô log luôn phải mở. Không chỉ để đọc: Text đang bị khoá thì
+        # insert() im lặng không ghi được gì — log của lượt chạy sẽ mất sạch mà
+        # không báo lỗi, nhìn như tool đứng im trong khi nó vẫn đang chạy.
         self.log_box.config(state="normal")
+        self.join_log_box.config(state="normal")
 
     # ==================== KIỂM TRA DỮ LIỆU ====================
 
@@ -664,10 +684,12 @@ class App(tk.Tk):
                 elif kind == "__login_done__":
                     payload.destroy()
                     self.refresh_accounts()
+                    self.refresh_join_nicks()
                 continue
 
             self.append_log(str(item))
 
+        self._drain_join_log_queue()
         self.after(100, self._drain_log_queue)
 
     # ==================== TAB: NỘI DUNG BÀI ĐĂNG ====================
@@ -1447,10 +1469,11 @@ class App(tk.Tk):
             return bo_qua(f"không tìm thấy nick '{nick}' trong thư mục profile.")
 
         camp = self.cfg["campaigns"][camp_name]
-        if not os.path.exists(camp["excel_path"]):
-            return bo_qua(f"thiếu file Excel: {camp['excel_path']}")
         if not camp["groups"]:
             return bo_qua(f"chiến dịch '{camp_name}' chưa khai báo nhóm nào.")
+
+        if not os.path.exists(camp["excel_path"]):
+            return bo_qua(f"thiếu file Excel: {camp['excel_path']}")
 
         van_de = bot.kiem_tra_du_lieu(camp_name)
         loi = [v for v in van_de if v["muc"] == "loi"]
@@ -1488,6 +1511,641 @@ class App(tk.Tk):
             f"'{camp_name}' bằng nick '{nick}'.")
         self._khoi_dong_worker(nick, path, camp_name, tu_lich=True)
         return True
+
+    # ==================== TAB: THAM GIA NHÓM ====================
+    # Tách hẳn khỏi việc đăng bài: danh sách nhóm riêng, nick chọn riêng, log
+    # riêng, nút chạy riêng. Đăng bài không bao giờ tự đi vào nhóm và ngược lại.
+
+    def _build_join_tab(self):
+        f = self.tab_join
+
+        # --- Cột trái: chọn nick ---
+        left = ttk.LabelFrame(f, text="Nick sẽ đi tham gia nhóm")
+        left.pack(side="left", fill="y", padx=(0, 8), pady=4)
+
+        self.join_nick_list = tk.Listbox(left, width=24, exportselection=False)
+        self.join_nick_list.pack(fill="y", expand=True, padx=6, pady=6)
+        self.join_nick_list.bind("<<ListboxSelect>>", lambda _e: self.refresh_join_tree())
+
+        ttk.Label(
+            left,
+            text="Lịch sử tham gia ghi theo từng\nnick, nằm trong profile của\nnick đó.",
+            foreground="#555", justify="left",
+        ).pack(anchor="w", padx=6, pady=(0, 8))
+
+        right = ttk.Frame(f)
+        right.pack(side="left", fill="both", expand=True, pady=4)
+
+        # --- Danh sách nhóm + trạng thái theo nick đang chọn ---
+        khung_ds = ttk.LabelFrame(right, text="Danh sách nhóm muốn tham gia")
+        khung_ds.pack(fill="both", expand=True)
+
+        thanh = ttk.Frame(khung_ds)
+        thanh.pack(fill="x", padx=6, pady=6)
+        ttk.Button(thanh, text="+ Dán link nhóm", command=self.them_link_nhom).pack(side="left")
+        ttk.Button(thanh, text="Nạp từ chiến dịch...", command=self.nap_link_tu_chien_dich) \
+            .pack(side="left", padx=4)
+        ttk.Button(thanh, text="📋 Sao chép link", command=self.sao_chep_link).pack(side="left")
+        ttk.Button(thanh, text="☑ Tick hết", command=lambda: self.tick_tat_ca(True)) \
+            .pack(side="left", padx=(4, 0))
+        ttk.Button(thanh, text="☐ Bỏ tick", command=lambda: self.tick_tat_ca(False)) \
+            .pack(side="left", padx=4)
+        ttk.Button(thanh, text="Xóa nhóm đã tick", command=self.xoa_link_da_chon).pack(side="left")
+        ttk.Button(thanh, text="Xóa hết", command=self.xoa_het_link).pack(side="left", padx=4)
+        self.join_dem = ttk.Label(thanh, text="", foreground="#555")
+        self.join_dem.pack(side="left", padx=8)
+
+        # Treeview không có checkbox thật, nên cột đầu là ô chữ ☐/☑ và bắt
+        # click vào đúng cột đó. Dùng ô tick thay vì "dòng đang bôi đen" vì bôi
+        # đen mất ngay khi bảng vẽ lại hoặc khi bấm chỗ khác — người dùng tick
+        # 20 nhóm xong quay ra bấm nút thì mất sạch.
+        cot = ("chon", "link", "trang_thai", "thoi_gian")
+        self.join_tree = ttk.Treeview(khung_ds, columns=cot, show="headings",
+                                      height=9, selectmode="extended")
+        self.join_tree.heading("chon", text="✓", command=self.doi_tick_tat_ca)
+        self.join_tree.heading("link", text="Link nhóm")
+        self.join_tree.heading("trang_thai", text="Trạng thái với nick đang chọn")
+        self.join_tree.heading("thoi_gian", text="Lần gần nhất")
+        self.join_tree.column("chon", width=34, anchor="center", stretch=False)
+        self.join_tree.column("link", width=360)
+        self.join_tree.column("trang_thai", width=180)
+        self.join_tree.column("thoi_gian", width=130)
+        self.join_tree.bind("<Button-1>", self._bam_vao_bang)
+        self.join_tree.bind("<space>", lambda _e: self._doi_tick(self.join_tree.selection()))
+        self.join_tree.bind("<Control-c>", lambda _e: self.sao_chep_link())
+        self.join_tree.bind("<Command-c>", lambda _e: self.sao_chep_link())
+        # Chuột phải trên Windows là Button-3, trên Mac có máy ra Button-2
+        for phim in ("<Button-3>", "<Button-2>"):
+            self.join_tree.bind(phim, self._menu_chuot_phai)
+
+        self.menu_nhom = tk.Menu(self, tearoff=0)
+        self.menu_nhom.add_command(label="Sao chép link", command=self.sao_chep_link)
+        self.menu_nhom.add_command(label="Mở nhóm trong trình duyệt", command=self.mo_nhom_tren_web)
+        cuon = ttk.Scrollbar(khung_ds, command=self.join_tree.yview)
+        self.join_tree.configure(yscrollcommand=cuon.set)
+        cuon.pack(side="right", fill="y")
+        self.join_tree.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        # --- Cài đặt né ban ---
+        khung_cd = ttk.LabelFrame(right, text="Cài đặt an toàn (dùng chung mọi nick)")
+        khung_cd.pack(fill="x", pady=6)
+
+        o_so = [
+            ("max_moi_lan", "Tối đa mỗi lần chạy"),
+            ("max_moi_ngay", "Tối đa mỗi nick mỗi ngày"),
+            ("nghi_min", "Nghỉ giữa 2 nhóm — ít nhất (giây)"),
+            ("nghi_max", "— nhiều nhất (giây)"),
+            ("nghi_dai_sau", "Nghỉ dài sau mỗi (nhóm)"),
+            ("nghi_dai_phut", "Nghỉ dài bao lâu (phút)"),
+            ("gio_bat_dau", "Chỉ chạy từ (giờ VN)"),
+            ("gio_ket_thuc", "đến (giờ VN)"),
+            ("gio_tam_nghi", "Bị chặn thì nghỉ (giờ)"),
+        ]
+        self.join_vars = {}
+        for i, (key, nhan) in enumerate(o_so):
+            hang, cot_i = divmod(i, 2)
+            ttk.Label(khung_cd, text=nhan).grid(row=hang, column=cot_i * 2,
+                                                sticky="w", padx=6, pady=3)
+            var = tk.StringVar()
+            self.join_vars[key] = var
+            ttk.Entry(khung_cd, textvariable=var, width=8) \
+                .grid(row=hang, column=cot_i * 2 + 1, sticky="w", padx=6)
+        self.nick_moi_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            khung_cd, text="Nick mới lập — ép trần xuống rất thấp (2 nhóm/lần, 3 nhóm/ngày)",
+            variable=self.nick_moi_var,
+        ).grid(row=5, column=0, columnspan=4, sticky="w", padx=6, pady=(6, 2))
+
+        ttk.Button(khung_cd, text="💾 Lưu cài đặt", command=self.luu_cai_dat_join) \
+            .grid(row=0, column=4, rowspan=3, padx=12)
+        ttk.Button(khung_cd, text="Bỏ tạm nghỉ của nick", command=self.bo_tam_nghi_nick) \
+            .grid(row=3, column=4, padx=12)
+        ttk.Button(khung_cd, text="🔄 Soát lại trạng thái", command=self.soat_lai_trang_thai) \
+            .grid(row=4, column=4, padx=12)
+
+        ttk.Label(
+            khung_cd,
+            text="Tool xáo thứ tự nhóm, xem trang vài giây rồi mới bấm, thỉnh thoảng "
+                 "ghé bảng tin, nghỉ ngẫu nhiên giữa các nhóm và nghỉ dài sau mỗi vài "
+                 "nhóm. Bấm xong luôn kiểm chứng nút có đổi trạng thái không — 2 lần "
+                 "bấm không ăn thua là coi như đang bị chặn ngầm: dừng và khoá nick "
+                 "lại vài chục tiếng, không cho chạy tiếp.",
+            foreground="#a05000", wraplength=640, justify="left",
+        ).grid(row=6, column=0, columnspan=5, sticky="w", padx=6, pady=(4, 6))
+
+        # --- Nút chạy + log riêng ---
+        thanh2 = ttk.Frame(right)
+        thanh2.pack(fill="x", pady=(0, 4))
+        self.btn_join_chon = ttk.Button(thanh2, text="▶ Tham gia nhóm đã tick",
+                                        command=lambda: self.bat_dau_join(chi_chon=True))
+        self.btn_join_chon.pack(side="left")
+        self.btn_join_all = ttk.Button(thanh2, text="▶ Tham gia tất cả nhóm chưa vào",
+                                       command=lambda: self.bat_dau_join(chi_chon=False))
+        self.btn_join_all.pack(side="left", padx=6)
+        self.btn_join_stop = ttk.Button(thanh2, text="■ Dừng",
+                                        command=self.request_stop, state="disabled")
+        self.btn_join_stop.pack(side="left")
+        ttk.Button(thanh2, text="Xóa màn hình log",
+                   command=lambda: self.join_log_box.delete("1.0", "end")).pack(side="left", padx=6)
+
+        self.join_log_box = tk.Text(right, wrap="word", height=10, font=("Menlo", 11))
+        cuon2 = ttk.Scrollbar(right, command=self.join_log_box.yview)
+        self.join_log_box.configure(yscrollcommand=cuon2.set)
+        cuon2.pack(side="right", fill="y")
+        self.join_log_box.pack(fill="both", expand=True)
+
+        self.nap_cai_dat_join()
+
+    # ---------- dữ liệu của tab ----------
+
+    def nap_cai_dat_join(self):
+        """Đổ cài đặt tham gia nhóm từ config lên các ô."""
+        cai_dat = joiner.load_cai_dat()
+        for key, var in self.join_vars.items():
+            var.set(str(cai_dat[key]))
+        self.nick_moi_var.set(bool(cai_dat["nick_moi"]))
+        self.refresh_join_tree()
+
+    def refresh_join_nicks(self):
+        """Nạp lại danh sách nick cho tab tham gia nhóm."""
+        self.join_nick_list.delete(0, "end")
+        for name, _ in bot.list_sessions():
+            self.join_nick_list.insert("end", name)
+        self.refresh_join_tree()
+
+    def join_nick_dang_chon(self):
+        """(tên, đường dẫn profile) của nick đang chọn ở tab này, hoặc None."""
+        sel = self.join_nick_list.curselection()
+        if not sel:
+            return None
+        name = self.join_nick_list.get(sel[0])
+        return name, os.path.join(self.cfg["profiles_dir"], name)
+
+    def refresh_join_tree(self):
+        """Vẽ lại bảng nhóm kèm trạng thái theo nick đang chọn."""
+        if not hasattr(self, "join_tree"):
+            return
+        self.join_tree.delete(*self.join_tree.get_children())
+
+        cai_dat = joiner.load_cai_dat()
+        links = cai_dat["links"]
+        acc = self.join_nick_dang_chon()
+        lich_su = joiner.load_log(acc[1]) if acc else joiner.log_rong()
+
+        # Bỏ khỏi danh sách tick những link không còn trong bảng nữa
+        self.join_da_tick &= {joiner.clean_group_url(u) for u in links}
+
+        for url in links:
+            muc = joiner.muc_nhom(lich_su, url) if acc else {}
+            mo_ta = joiner.mo_ta_trang_thai(muc) if acc else "—"
+            danh_dau = "☑" if joiner.clean_group_url(url) in self.join_da_tick else "☐"
+            self.join_tree.insert("", "end",
+                                  values=(danh_dau, url, mo_ta, muc.get("time", "")))
+
+        if not acc:
+            self.join_dem.config(
+                text=f"{len(links)} nhóm — đã tick {len(self.join_da_tick)} | "
+                     "chọn nick để xem trạng thái")
+            return
+
+        can_vao = len(joiner.loc_nhom_can_vao(links, lich_su))
+        hom_nay = joiner.dem_da_xin_hom_nay(lich_su)
+        dang_nghi, den, ly_do = joiner.dang_tam_nghi(lich_su)
+
+        chu = (f"{len(links)} nhóm — {can_vao} cần xử lý | đã tick "
+               f"{len(self.join_da_tick)} | nick '{acc[0]}' hôm nay đã bấm "
+               f"{hom_nay}/{cai_dat['max_moi_ngay']}")
+        if dang_nghi:
+            chu += f"  ⛔ ĐANG TẠM NGHỈ tới {den.strftime('%d/%m %H:%M')} ({ly_do})"
+        elif not joiner.trong_gio_hoat_dong(cai_dat):
+            chu += (f"  ⏰ ngoài khung giờ {cai_dat['gio_bat_dau']}h–"
+                    f"{cai_dat['gio_ket_thuc']}h")
+        self.join_dem.config(text=chu)
+
+    def _link_cua_dong(self, dong):
+        return self.join_tree.item(dong, "values")[1]
+
+    def _bam_vao_bang(self, event):
+        """Bấm vào bất kỳ đâu trên một dòng là đổi tick dòng đó.
+
+        Không trả về "break": để Treeview vẫn bôi đen dòng vừa bấm như thường,
+        nhờ vậy nút 'Sao chép link' và Ctrl+C biết đang nói tới dòng nào.
+        """
+        if self.dang_khoa:
+            return None
+        if self.join_tree.identify_region(event.x, event.y) not in ("cell", "tree"):
+            return None
+        dong = self.join_tree.identify_row(event.y)
+        if not dong:
+            return None
+        self._doi_tick([dong])
+        return None
+
+    def _doi_tick(self, cac_dong):
+        """Đảo trạng thái tick của các dòng (đang tick → bỏ, chưa → tick)."""
+        if self.dang_khoa:
+            return
+        for dong in cac_dong:
+            url = joiner.clean_group_url(self._link_cua_dong(dong))
+            if url in self.join_da_tick:
+                self.join_da_tick.discard(url)
+                self.join_tree.set(dong, "chon", "☐")
+            else:
+                self.join_da_tick.add(url)
+                self.join_tree.set(dong, "chon", "☑")
+        self._cap_nhat_dem_tick()
+
+    def tick_tat_ca(self, bat):
+        """Tick hết hoặc bỏ tick hết mọi dòng đang hiện."""
+        if self.dang_khoa:
+            return
+        for dong in self.join_tree.get_children():
+            url = joiner.clean_group_url(self._link_cua_dong(dong))
+            if bat:
+                self.join_da_tick.add(url)
+            else:
+                self.join_da_tick.discard(url)
+            self.join_tree.set(dong, "chon", "☑" if bat else "☐")
+        self._cap_nhat_dem_tick()
+
+    def doi_tick_tat_ca(self):
+        """Bấm vào tiêu đề cột ✓: chưa tick hết thì tick hết, tick hết rồi thì bỏ."""
+        tong = len(self.join_tree.get_children())
+        self.tick_tat_ca(len(self.join_da_tick) < tong)
+
+    def _cap_nhat_dem_tick(self):
+        """Sửa mỗi con số 'đã tick' trong dòng chữ, khỏi vẽ lại cả bảng."""
+        chu = self.join_dem["text"]
+        if "đã tick" in chu:
+            dau = chu.index("đã tick")
+            cuoi = chu.index("|", dau) if "|" in chu[dau:] else len(chu)
+            self.join_dem.config(
+                text=chu[:dau] + f"đã tick {len(self.join_da_tick)} " + chu[cuoi:])
+
+    def _link_dang_nham(self):
+        """Link của các dòng đang bôi đen; không có dòng nào thì lấy dòng đã tick."""
+        dang_boi_den = [self._link_cua_dong(d) for d in self.join_tree.selection()]
+        return dang_boi_den or self.link_da_tick()
+
+    def sao_chep_link(self):
+        """Chép link của dòng đang bôi đen (hoặc các dòng đã tick) vào clipboard."""
+        links = self._link_dang_nham()
+        if not links:
+            messagebox.showinfo("Chưa chọn dòng nào",
+                                "Bấm vào một dòng trong bảng rồi sao chép.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(links))
+        self.update()       # không gọi thì clipboard trống sau khi tool đóng
+        self.append_join_log(
+            f"📋 Đã sao chép {len(links)} link." if len(links) > 1
+            else f"📋 Đã sao chép: {links[0]}")
+
+    def mo_nhom_tren_web(self):
+        """Mở nhóm đang chọn bằng trình duyệt mặc định để xem thử bằng tay."""
+        links = self._link_dang_nham()
+        if not links:
+            return
+        if len(links) > 5 and not messagebox.askyesno(
+            "Mở nhiều tab", f"Sẽ mở {len(links)} tab trình duyệt. Tiếp tục?"):
+            return
+        for u in links[:20]:
+            webbrowser.open(u)
+
+    def _menu_chuot_phai(self, event):
+        """Menu chuột phải trên bảng nhóm. Không đổi tick — chỉ chọn dòng."""
+        dong = self.join_tree.identify_row(event.y)
+        if not dong:
+            return
+        if dong not in self.join_tree.selection():
+            self.join_tree.selection_set(dong)
+        try:
+            self.menu_nhom.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.menu_nhom.grab_release()
+
+    def link_da_tick(self):
+        """Danh sách link đang tick, theo đúng thứ tự hiện trong bảng."""
+        return [self._link_cua_dong(d) for d in self.join_tree.get_children()
+                if joiner.clean_group_url(self._link_cua_dong(d)) in self.join_da_tick]
+
+    def _ghi_links(self, links):
+        """Lưu danh sách nhóm mới (đã bỏ trùng) rồi vẽ lại bảng."""
+        sach = []
+        da_gap = set()
+        for u in links:
+            cu = joiner.clean_group_url(u)
+            if cu and cu not in da_gap:
+                da_gap.add(cu)
+                sach.append(cu)
+        cai_dat = joiner.load_cai_dat()
+        cai_dat["links"] = sach
+        # Đồng bộ luôn vào self.cfg đang giữ trong bộ nhớ: joiner ghi thẳng
+        # xuống file, còn các nút 'Lưu cấu hình' khác lại ghi đè cả file bằng
+        # self.cfg — không đồng bộ là danh sách nhóm vừa thêm biến mất.
+        self.cfg["auto_join"] = joiner.save_cai_dat(cai_dat)
+        self.refresh_join_tree()
+        return sach
+
+    def them_link_nhom(self):
+        if self.dang_chay():
+            return
+        text = DanNhieuDong(
+            self, "Dán link nhóm",
+            "Mỗi dòng một link nhóm Facebook:").result
+        if not text:
+            return
+        cu = joiner.load_cai_dat()["links"]
+        moi = [d for d in text.splitlines() if d.strip()]
+        sach = self._ghi_links(cu + moi)
+        self.append_join_log(f"Đã thêm {len(moi)} dòng — danh sách còn {len(sach)} nhóm (đã bỏ trùng).")
+
+    def nap_link_tu_chien_dich(self):
+        """Mượn danh sách nhóm đã khai ở một chiến dịch cho khỏi gõ lại.
+
+        Chỉ CHÉP sang một lần, không dùng chung: sau đó sửa bên nào là việc của
+        bên đó, tab này không ăn theo chiến dịch nào cả.
+        """
+        if self.dang_chay():
+            return
+        ten = ChonMotMuc(self, "Nạp link từ chiến dịch",
+                         "Chép link nhóm của chiến dịch nào sang đây?",
+                         list(self.cfg["campaigns"])).result
+        if not ten:
+            return
+        nguon = [u for urls in self.cfg["campaigns"][ten]["groups"].values()
+                 for u in urls if u.strip()]
+        if not nguon:
+            messagebox.showinfo("Không có gì để nạp", f"Chiến dịch '{ten}' chưa khai link nhóm nào.")
+            return
+        truoc = len(joiner.load_cai_dat()["links"])
+        sach = self._ghi_links(joiner.load_cai_dat()["links"] + nguon)
+        self.append_join_log(
+            f"Đã chép {len(nguon)} link từ chiến dịch '{ten}' — thêm được "
+            f"{len(sach) - truoc} nhóm mới, tổng {len(sach)} nhóm.")
+
+    def xoa_link_da_chon(self):
+        if self.dang_chay():
+            return
+        bo = set(self.link_da_tick())
+        if not bo:
+            messagebox.showwarning("Chưa tick nhóm nào",
+                                   "Hãy tick vào ô ✓ ở đầu các dòng cần xóa.")
+            return
+        if not messagebox.askyesno("Xóa nhóm đã tick",
+                                   f"Bỏ {len(bo)} nhóm khỏi danh sách?\n\n"
+                                   "Chỉ xóa khỏi danh sách này, không rời nhóm trên Facebook."):
+            return
+        con = [u for u in joiner.load_cai_dat()["links"]
+               if joiner.clean_group_url(u) not in {joiner.clean_group_url(x) for x in bo}]
+        self._ghi_links(con)
+        self.append_join_log(f"Đã bỏ {len(bo)} nhóm khỏi danh sách.")
+
+    def xoa_het_link(self):
+        if self.dang_chay():
+            return
+        if not joiner.load_cai_dat()["links"]:
+            return
+        if not messagebox.askyesno("Xóa hết", "Xóa toàn bộ danh sách nhóm ở tab này?\n\n"
+                                              "Lịch sử đã tham gia của các nick vẫn giữ nguyên."):
+            return
+        self._ghi_links([])
+        self.append_join_log("Đã xóa toàn bộ danh sách nhóm.")
+
+    def luu_cai_dat_join(self):
+        if self.dang_chay():
+            return
+        cai_dat = joiner.load_cai_dat()
+        cai_dat["nick_moi"] = self.nick_moi_var.get()
+        for key, var in self.join_vars.items():
+            try:
+                cai_dat[key] = int(var.get().strip())
+            except ValueError:
+                messagebox.showerror("Sai định dạng", f"'{var.get()}' không phải số nguyên.")
+                return
+
+        # save_cai_dat tự kẹp về khoảng an toàn; đọc lại rồi đổ lên ô để người
+        # dùng thấy ngay con số thật sự được dùng, không tưởng mình đặt được 5s.
+        da_luu = joiner.save_cai_dat(cai_dat)
+        self.cfg["auto_join"] = da_luu
+        khac = {k: (cai_dat[k], da_luu[k]) for k in self.join_vars if cai_dat[k] != da_luu[k]}
+        for key, var in self.join_vars.items():
+            var.set(str(da_luu[key]))
+        self.nick_moi_var.set(bool(da_luu["nick_moi"]))
+        self.refresh_join_tree()
+
+        if khac:
+            chi_tiet = "\n".join(f"  • {k}: {a} → {b}" for k, (a, b) in khac.items())
+            messagebox.showwarning(
+                "Đã chỉnh về mức an toàn",
+                "Vài giá trị nằm ngoài khoảng an toàn nên tool tự sửa:\n\n" + chi_tiet +
+                "\n\nVào nhóm dồn dập là hành vi Facebook chặn nhanh nhất.")
+        else:
+            messagebox.showinfo("Đã lưu", "Đã lưu cài đặt tham gia nhóm.")
+
+    # ---------- chạy ----------
+
+    def bat_dau_join(self, chi_chon=False):
+        """Chạy tham gia nhóm. `chi_chon` = chỉ các dòng đang chọn trong bảng."""
+        if self.worker and self.worker.is_alive():
+            messagebox.showwarning("Đang chạy", "Đang có tiến trình chạy, hãy dừng trước.")
+            return
+
+        acc = self.join_nick_dang_chon()
+        if not acc:
+            messagebox.showwarning("Chưa chọn nick", "Hãy chọn nick sẽ đi tham gia nhóm.")
+            return
+        nick, path = acc
+
+        cai_dat = joiner.load_cai_dat()
+        if chi_chon:
+            links = self.link_da_tick()
+            if not links:
+                messagebox.showwarning(
+                    "Chưa tick nhóm nào",
+                    "Hãy tick vào ô ✓ ở đầu mỗi dòng nhóm muốn chạy.\n\n"
+                    "Hoặc bấm '▶ Tham gia tất cả nhóm chưa vào' để chạy cả danh sách.")
+                return
+        else:
+            links = cai_dat["links"]
+
+        if not links:
+            messagebox.showinfo("Chưa có nhóm", "Danh sách nhóm đang trống. Bấm '+ Dán link nhóm'.")
+            return
+
+        lich_su = joiner.load_log(path)
+
+        # Nick đang bị khoá vì có dấu hiệu bị chặn — chặn ngay tại giao diện,
+        # đừng để mở Chrome ra rồi mới báo.
+        dang_nghi, den, ly_do = joiner.dang_tam_nghi(lich_su)
+        if dang_nghi:
+            messagebox.showerror(
+                "Nick đang tạm nghỉ",
+                f"Lần chạy trước tool thấy dấu hiệu Facebook chặn nick '{nick}' "
+                f"({ly_do}), nên đã khoá tới {den.strftime('%H:%M ngày %d/%m')}.\n\n"
+                "Chạy tiếp lúc này là cách nhanh nhất để mất nick. Hãy chờ hết hạn, "
+                "hoặc dùng nick khác.\n\nThật sự cần thì bấm 'Bỏ tạm nghỉ của nick' "
+                "— bạn tự chịu rủi ro.")
+            return
+
+        if not joiner.trong_gio_hoat_dong(cai_dat):
+            messagebox.showwarning(
+                "Ngoài khung giờ",
+                f"Tool chỉ tham gia nhóm trong khung {cai_dat['gio_bat_dau']}h–"
+                f"{cai_dat['gio_ket_thuc']}h giờ Việt Nam.\n\n"
+                "Xin vào nhóm lúc nửa đêm là dấu vết máy móc rất rõ — người thật "
+                "thì đang ngủ. Đổi khung giờ ở ô cài đặt nếu bạn thật sự cần.")
+            return
+
+        can_vao = joiner.loc_nhom_can_vao(links, lich_su)
+        da_hom_nay = joiner.dem_da_xin_hom_nay(lich_su)
+        quota = joiner.tinh_quota(cai_dat, lich_su)
+
+        if not can_vao:
+            messagebox.showinfo(
+                "Không có gì để làm",
+                f"Mọi nhóm đang chọn đều đã xong với nick '{nick}', hoặc đang "
+                "chờ tới hạn thử lại.")
+            return
+        if quota <= 0:
+            messagebox.showwarning(
+                "Chạm trần trong ngày",
+                f"Nick '{nick}' hôm nay đã bấm xin vào {da_hom_nay} nhóm, chạm trần "
+                f"{cai_dat['max_moi_ngay']} nhóm/ngày.\n\nMai chạy tiếp. Nâng trần "
+                "lên được, nhưng số càng cao thì nhịp thao tác càng dày — nick ngày "
+                "nào cũng vào hàng chục nhóm là thứ Facebook nhận ra rất nhanh.")
+            return
+
+        uoc_phut = round(quota * (cai_dat["nghi_min"] + cai_dat["nghi_max"]) / 2 / 60
+                         + quota // max(cai_dat["nghi_dai_sau"], 1) * cai_dat["nghi_dai_phut"])
+        if not messagebox.askyesno(
+            "Bắt đầu tham gia nhóm",
+            f"Nick    : {nick}\n"
+            f"Đang chọn: {len(links)} nhóm, trong đó {len(can_vao)} nhóm chưa xử lý\n"
+            f"Lần này  : tối đa {quota} nhóm (hôm nay đã {da_hom_nay}/{cai_dat['max_moi_ngay']})\n"
+            f"Ước tính : khoảng {uoc_phut} phút\n\n"
+            "Chrome sẽ mở và lần lượt vào từng nhóm, có nghỉ dài giữa chừng nên "
+            "đừng sốt ruột. Đừng dùng cửa sổ Chrome đó trong lúc chạy.\n\n"
+            "Chạy luôn?"):
+            return
+
+        self.stop_event.clear()
+        joiner.LOG_FN = self.join_log_queue.put
+        joiner.SHOULD_STOP = self.stop_event.is_set
+
+        self.set_ui_locked(True)
+        self.btn_join_stop.config(state="normal")
+        self.status.config(text=f"⏵ Đang tham gia nhóm bằng nick: {nick}")
+
+        def work():
+            stats = None
+            try:
+                stats = joiner.chay_join(path, links=links, cai_dat=cai_dat)
+            except Exception as e:
+                self.join_log_queue.put(f"✗ LỖI: {e}")
+            finally:
+                self.join_log_queue.put(("__join_done__", stats))
+
+        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker.start()
+
+    def bo_tam_nghi_nick(self):
+        """Gỡ khoá tạm nghỉ cho nick đang chọn — chỉ dùng khi chắc chắn là báo nhầm."""
+        if self.dang_chay():
+            return
+        acc = self.join_nick_dang_chon()
+        if not acc:
+            messagebox.showwarning("Chưa chọn nick", "Hãy chọn nick trong danh sách.")
+            return
+        nick, path = acc
+        lich_su = joiner.load_log(path)
+        dang_nghi, den, ly_do = joiner.dang_tam_nghi(lich_su)
+        if not dang_nghi:
+            messagebox.showinfo("Không có gì để bỏ", f"Nick '{nick}' đang không bị tạm nghỉ.")
+            return
+        if not messagebox.askyesno(
+            "Bỏ tạm nghỉ",
+            f"Tool khoá nick '{nick}' tới {den.strftime('%H:%M ngày %d/%m')} vì "
+            f"{ly_do}.\n\nĐây là cảnh báo thật, không phải lỗi vặt: Facebook vừa "
+            "chặn thao tác vào nhóm của nick này. Bỏ khoá rồi chạy tiếp thì khả "
+            "năng mất nick là rất cao.\n\nVẫn bỏ khoá?"):
+            return
+        joiner.bo_tam_nghi(path, lich_su)
+        self.refresh_join_tree()
+        self.append_join_log(f"⚠ Đã bỏ tạm nghỉ cho nick '{nick}' theo yêu cầu.")
+
+    def soat_lai_trang_thai(self):
+        """Bỏ các bản ghi 'đã vào nhóm' mà tool chưa từng bấm nút Tham gia.
+
+        Dùng khi bạn kiểm tra trên Facebook thấy thật ra chưa vào nhóm đó: xoá
+        đi thì nhóm quay về 'chưa xử lý' và lần chạy tới tool mở lại kiểm tra.
+        """
+        if self.dang_chay():
+            return
+        acc = self.join_nick_dang_chon()
+        if not acc:
+            messagebox.showwarning("Chưa chọn nick", "Hãy chọn nick trong danh sách.")
+            return
+        nick, path = acc
+        lich_su = joiner.load_log(path)
+        so = sum(1 for m in lich_su.get("nhom", {}).values()
+                 if isinstance(m, dict)
+                 and m.get("status") in (joiner.DA_LA_THANH_VIEN, joiner.CHO_DUYET)
+                 and not m.get("da_bam"))
+        if not so:
+            messagebox.showinfo(
+                "Không có gì để soát",
+                f"Mọi nhóm trong lịch sử của '{nick}' đều do tool tự bấm tham gia, "
+                "không có bản ghi nào là tool tự kết luận.")
+            return
+        if not messagebox.askyesno(
+            "Soát lại trạng thái",
+            f"Có {so} nhóm được ghi là 'đã là thành viên / đang chờ duyệt' mà tool "
+            f"KHÔNG hề bấm nút Tham gia — nó tự nhìn trang rồi kết luận.\n\n"
+            "Xoá mấy bản ghi đó đi thì các nhóm này quay về 'chưa xử lý', lần chạy "
+            "tới tool sẽ mở lại và kiểm tra tử tế.\n\nLàm luôn?"):
+            return
+        da_bo = joiner.don_log_ghi_khong(path, lich_su, ep_buoc=True)
+        self.refresh_join_tree()
+        self.append_join_log(f"🔄 Đã bỏ {da_bo} bản ghi tự kết luận của nick '{nick}' "
+                             "— các nhóm đó sẽ được kiểm tra lại.")
+
+    def append_join_log(self, text):
+        self.join_log_box.insert("end", text + "\n")
+        self.join_log_box.see("end")
+
+    def _drain_join_log_queue(self):
+        """Đổ log của việc tham gia nhóm vào ô log riêng của tab đó."""
+        ve_lai_bang = False
+        while True:
+            try:
+                item = self.join_log_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            if isinstance(item, tuple):
+                _kind, stats = item
+                self.set_ui_locked(False)
+                self.btn_join_stop.config(state="disabled")
+                self.status.config(text="Đã dừng — giờ sửa được cấu hình.")
+                self.refresh_join_tree()
+                if stats and stats.get("con_lai"):
+                    messagebox.showinfo(
+                        "Còn nhóm chưa xử lý",
+                        f"Xong lượt này: {stats['vao']} nhóm vừa gửi yêu cầu.\n\n"
+                        f"Còn {stats['con_lai']} nhóm chưa đụng tới — chạy lại vào "
+                        "hôm khác, đừng chạy dồn trong một ngày.")
+                continue
+
+            dong = str(item)
+            self.append_join_log(dong)
+            # Xong một nhóm thì vẽ lại bảng để thấy trạng thái đổi ngay, không
+            # phải chờ hết cả lượt chạy mới biết nhóm nào đã vào được.
+            if "── Nhóm" in dong:
+                ve_lai_bang = True
+
+        if ve_lai_bang:
+            self.refresh_join_tree()
 
     # ==================== ĐÓNG ====================
 
@@ -2258,6 +2916,67 @@ class SimplePrompt(tk.Toplevel):
         ttk.Button(bar, text="OK", command=ok).pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
         entry.bind("<Return>", lambda _e: ok())
+
+        parent.wait_window(self)
+
+
+class DanNhieuDong(tk.Toplevel):
+    """Hộp thoại dán nhiều dòng (danh sách link nhóm). Trả về chuỗi hoặc None."""
+
+    def __init__(self, parent, title, label):
+        super().__init__(parent)
+        self.title(title)
+        self.result = None
+        self.transient(parent)
+        self.grab_set()
+
+        ttk.Label(self, text=label).pack(padx=16, pady=(16, 6), anchor="w")
+        box = tk.Text(self, width=70, height=14, wrap="none")
+        box.pack(padx=16, fill="both", expand=True)
+        box.focus_set()
+
+        def ok():
+            self.result = box.get("1.0", "end").strip() or None
+            self.destroy()
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=12)
+        ttk.Button(bar, text="Thêm vào danh sách", command=ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
+
+        parent.wait_window(self)
+
+
+class ChonMotMuc(tk.Toplevel):
+    """Hộp thoại chọn 1 mục trong danh sách. Trả về mục đã chọn hoặc None."""
+
+    def __init__(self, parent, title, label, cac_muc):
+        super().__init__(parent)
+        self.title(title)
+        self.result = None
+        self.transient(parent)
+        self.grab_set()
+
+        ttk.Label(self, text=label).pack(padx=16, pady=(16, 6), anchor="w")
+        ds = tk.Listbox(self, width=44, height=min(max(len(cac_muc), 3), 12),
+                        exportselection=False)
+        for m in cac_muc:
+            ds.insert("end", m)
+        if cac_muc:
+            ds.selection_set(0)
+        ds.pack(padx=16, fill="both", expand=True)
+        ds.focus_set()
+
+        def ok():
+            sel = ds.curselection()
+            self.result = ds.get(sel[0]) if sel else None
+            self.destroy()
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=12)
+        ttk.Button(bar, text="OK", command=ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
+        ds.bind("<Double-Button-1>", lambda _e: ok())
 
         parent.wait_window(self)
 
