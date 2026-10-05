@@ -421,7 +421,7 @@ class App(tk.Tk):
                     else f"⚠ '{name}' có vẻ chưa đăng nhập xong — thử lại nếu cần."
                 )
             except Exception as e:
-                self.log_queue.put(f"✗ Lỗi mở Chrome: {e}")
+                self.log_queue.put(f"✗ {bot.mo_ta_loi_chay(e)}")
             finally:
                 self.log_queue.put(("__login_done__", win))
 

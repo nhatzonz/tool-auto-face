@@ -409,6 +409,49 @@ def kiem_tra_du_lieu(campaign=None):
 
 # ======================== ĐĂNG NHẬP ========================
 
+def mo_ta_loi_chay(e):
+    """Dịch lỗi kỹ thuật lúc mở trình duyệt thành câu người dùng làm được gì.
+
+    Riêng FileNotFoundError (WinError 2) rất hay bị hiểu nhầm là "máy chưa cài
+    Chrome". Thực ra Playwright chưa hề chạm tới Chrome ở thời điểm đó: nó phải
+    khởi chạy tiến trình phụ node.exe đóng kèm trong gói trước, node.exe mới là
+    cái đi tìm chrome.exe. Thiếu Chrome thật thì thông báo là "Chromium
+    distribution 'chrome' is not found". Nên WinError 2 luôn có nghĩa là thiếu
+    node.exe — thường do phần mềm diệt virus xóa mất, hoặc do biến môi trường
+    PLAYWRIGHT_NODEJS_PATH sót lại từ lần cài Node.js nào đó trỏ vào chỗ trống.
+    In thẳng đường dẫn ra để khỏi phải đoán.
+    """
+    if not isinstance(e, FileNotFoundError):
+        return f"Lỗi mở Chrome: {e}"
+
+    try:
+        from playwright._impl._driver import compute_driver_executable
+        node_path = compute_driver_executable()[0]
+    except Exception:
+        node_path = "(không xác định được)"
+
+    bien_moi_truong = os.environ.get("PLAYWRIGHT_NODEJS_PATH")
+    con_file = os.path.exists(node_path) if node_path else False
+
+    dong = [
+        "Không chạy được trình điều khiển trình duyệt (thiếu file, không phải lỗi Chrome).",
+        f"  Cần file : {node_path}",
+        f"  Có tồn tại: {'có' if con_file else 'KHÔNG'}",
+    ]
+    if bien_moi_truong:
+        dong.append(f"  ⚠ Biến môi trường PLAYWRIGHT_NODEJS_PATH đang trỏ tới: {bien_moi_truong}")
+        dong.append("    → Xóa biến này trong Cài đặt Windows rồi mở lại tool.")
+    elif not con_file:
+        dong.append("    → File bị thiếu. Thường do phần mềm diệt virus xóa mất: vào mục")
+        dong.append("      Cách ly (Quarantine) khôi phục lại, rồi thêm cả thư mục tool vào")
+        dong.append("      danh sách loại trừ. Hoặc giải nén lại bản gốc cho đủ file.")
+    else:
+        dong.append("    → File có nhưng Windows không chạy được: thử chuyển cả thư mục tool")
+        dong.append("      sang đường dẫn ngắn, không dấu (ví dụ C:\\ToolFB\\).")
+    dong.append(f"  Chi tiết: {e}")
+    return "\n".join(dong)
+
+
 def open_profile(p, profile_dir, slow_mo=150):
     """Mở Chrome thật với profile bền tại `profile_dir`.
 
