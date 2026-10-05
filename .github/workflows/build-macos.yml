@@ -1,0 +1,74 @@
+name: Build app macOS
+
+# Chạy cùng điều kiện với build-windows.yml để mỗi lần đẩy code lên là có đủ
+# cả hai bản, khỏi phải nhớ build tay bản nào.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build-windows
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    # macos-14 trở lên là máy Apple Silicon. PyInstaller không build chéo kiến
+    # trúc, nên bản ra đây chỉ chạy trên Mac chip M1/M2/M3...; muốn bản cho Mac
+    # Intel thì phải thêm một job dùng macos-13.
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Kiểm tra Python có tkinter
+        # Giao diện tool viết bằng tkinter. Bản Python thiếu _tkinter vẫn cài
+        # thư viện bình thường, build vẫn xanh, nhưng app mở lên là tắt ngay —
+        # nên chặn ngay từ bước đầu cho dễ hiểu.
+        run: python -c "import tkinter; print('tkinter OK', tkinter.TkVersion)"
+
+      - name: Cài thư viện
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Không chạy 'playwright install chromium': tool mở Google Chrome thật
+      # trên máy người dùng. Xem giải thích trong build_macos.spec.
+
+      - name: Đóng gói
+        run: pyinstaller build_macos.spec --noconfirm
+
+      - name: Kiểm tra gói có đủ thành phần
+        # Thiếu driver Node thì app vẫn mở được, chỉ hỏng lúc bấm "Thêm nick"
+        # với lỗi khó hiểu. Bắt ngay tại đây.
+        run: |
+          APP="dist/ToolDangBaiFacebook.app"
+          NODE="$APP/Contents/Frameworks/playwright/driver/node"
+          test -d "$APP" || { echo "Không thấy $APP"; exit 1; }
+          test -x "$NODE" || { echo "Thiếu driver Node: $NODE"; exit 1; }
+          "$NODE" -v
+          echo "Dung lượng: $(du -sh "$APP" | cut -f1)"
+
+      - name: Kèm hướng dẫn sử dụng
+        run: cp HUONGDAN_NGUOI_DUNG.md dist/
+
+      - name: Nén giữ nguyên cấu trúc .app
+        # Bắt buộc phải nén trước khi upload: upload-artifact không giữ quyền
+        # chạy của file, tải về là app không mở được. ditto là lệnh nén của
+        # macOS, giữ đúng quyền và symlink bên trong gói .app.
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            ToolDangBaiFacebook.app ToolDangBaiFacebook-macOS.zip
+          ls -lh ToolDangBaiFacebook-macOS.zip
+
+      - name: Tải kết quả lên
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToolDangBaiFacebook-macOS
+          path: |
+            dist/ToolDangBaiFacebook-macOS.zip
+            dist/HUONGDAN_NGUOI_DUNG.md

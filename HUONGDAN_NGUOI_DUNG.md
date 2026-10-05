@@ -676,6 +676,24 @@ Toàn bộ nhóm, nội dung, ảnh, phiên đăng nhập giữ nguyên vì chú
 
 ## 15. Sao lưu và chuyển máy
 
+### Bản macOS thì dữ liệu nằm ở đâu
+
+Bản Windows để dữ liệu **cạnh file chạy**. Bản macOS (`ToolDangBaiFacebook.app`)
+thì không được làm vậy — chỗ đó nằm trong ruột app, cập nhật app là mất sạch.
+Nên dữ liệu nằm tại:
+
+```
+~/Library/Application Support/ToolDangBaiFacebook/
+```
+
+Trong đó có `config.json`, `phong_tro.xlsx`, `anh_phong/`, `fb_profiles/` — y
+hệt bản Windows, chỉ khác chỗ để. Lần đầu mở app, toàn bộ những thứ này được
+tạo tự động, không phải khai gì.
+
+Mở nhanh thư mục đó: trong Finder bấm `Cmd + Shift + G`, dán đường dẫn trên vào.
+Sao lưu thì copy cả thư mục đó.
+
+
 **Sao lưu:** copy thư mục `D:\DuLieuTool\` sang USB hoặc Google Drive, thỉnh
 thoảng làm lại. Máy hỏng là mất hết nếu không có bản sao. Thư mục tool thì
 không cần sao lưu — hỏng thì xin lại file zip là xong.

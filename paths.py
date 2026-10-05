@@ -16,10 +16,32 @@ import io
 import os
 import sys
 
+TEN_UNG_DUNG = "ToolDangBaiFacebook"
+
+
+def _thu_muc_du_lieu_mac():
+    """Chỗ ghi dữ liệu cho bản .app trên macOS.
+
+    Không dùng được thư mục chứa file thực thi như bản Windows: trong một gói
+    .app thì đó là ToolDangBaiFacebook.app/Contents/MacOS/ — ghi config và
+    profile Chrome vào ruột app thì cập nhật app là mất sạch dữ liệu, mà macOS
+    còn chặn ghi vào app đã ký số. Chỗ đúng theo quy ước của macOS là
+    ~/Library/Application Support/<tên app>/.
+    """
+    goc = os.path.expanduser("~/Library/Application Support")
+    return os.path.join(goc, TEN_UNG_DUNG)
+
+
 if getattr(sys, "frozen", False):
-    # Đang chạy từ file .exe do PyInstaller tạo
     BUNDLE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-    DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    thu_muc_exe = os.path.dirname(os.path.abspath(sys.executable))
+    if sys.platform == "darwin" and ".app/Contents/MacOS" in thu_muc_exe:
+        DATA_DIR = _thu_muc_du_lieu_mac()
+        os.makedirs(DATA_DIR, exist_ok=True)
+    else:
+        # Bản Windows (và bản macOS không đóng thành .app): dữ liệu nằm cạnh
+        # file chạy, đúng như hướng dẫn người dùng đang mô tả.
+        DATA_DIR = thu_muc_exe
 else:
     # Đang chạy từ mã nguồn (python gui.py)
     BUNDLE_DIR = DATA_DIR = os.path.dirname(os.path.abspath(__file__))
