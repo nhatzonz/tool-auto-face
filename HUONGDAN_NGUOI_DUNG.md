@@ -81,24 +81,136 @@ Góc trên có ô **Chiến dịch** — mỗi chiến dịch (phòng trọ, tuy
 seeding...) có nội dung, ảnh, nhóm riêng, nhưng dùng chung các nick Facebook.
 Mới bắt đầu thì cứ dùng chiến dịch "Phòng trọ" có sẵn.
 
-Làm theo đúng thứ tự 5 bước dưới đây cho lần đầu.
+Cạnh ô đó là **+ Thêm** (tạo chiến dịch mới), **Đổi tên**, **Xóa**. Ngoài cùng
+bên phải là **📖 Hướng dẫn sử dụng** — mở đúng tài liệu bạn đang đọc, ngay
+trong tool, không phải đóng tool để đi tìm file.
+
+Dưới đây đi qua 3 tab dùng nhiều nhất. Ba tab còn lại có mục riêng: Dữ liệu
+chiến dịch nằm rải trong các bước, hẹn giờ ở mục 10, tham gia nhóm ở mục 9.
+
+### Tab Tài khoản & Chạy
+
+Đây là nơi bấm chạy và theo dõi tool làm việc.
+
+![Tab Tài khoản & Chạy](anh_huong_dan/tai_khoan_va_chay.png)
+
+**Cột trái — danh sách nick.** Mỗi dòng là một tài khoản Facebook đã đăng nhập.
+Nick dùng chung cho mọi chiến dịch, khai một lần là xong.
+
+- **+ Thêm nick mới** — mở Chrome cho bạn đăng nhập bằng tay, xong bấm nút xác
+  nhận là tool nhớ luôn, lần sau không phải đăng nhập lại. **Nick phải bật xác
+  thực 2 lớp trước đã** — xem mục 4.
+- **Đăng nhập lại nick này** — dùng khi nick bị đòi xác minh hoặc hết phiên.
+- **Xóa nick** — bỏ nick khỏi danh sách và xóa profile Chrome của nó.
+
+**Thanh nút trên cùng.**
+
+| Nút | Làm gì |
+|---|---|
+| **▶ Bắt đầu đăng** | Chạy chiến dịch đang chọn bằng nick đang chọn |
+| **■ Dừng** | Dừng sau khi xong việc đang làm dở, không cắt ngang giữa chừng |
+| **🔍 Kiểm tra dữ liệu** | Soát trước khi chạy: thiếu file, thiếu ảnh, phân loại sai tên |
+| **Xóa màn hình log** | Chỉ dọn chữ đang hiện, không đụng dữ liệu |
+| **🗑 Xóa lịch sử đã đăng** | Xóa file chống đăng trùng — **cẩn thận**, xóa xong lần chạy tới đăng lại từ đầu |
+
+**Ô log bên dưới** chạy chữ theo thời gian thực. Màu chữ cho biết loại: đỏ là
+lỗi, cam là cảnh báo, xanh lá là xong việc, xám là thao tác phụ.
+
+> ⚠ Luôn bấm **🔍 Kiểm tra dữ liệu** trước khi chạy lần đầu trong ngày. Nó bắt
+> hết lỗi khai báo trong vài giây, đỡ phải phát hiện giữa chừng khi tool đã
+> đăng được nửa chừng.
+
+### Tab Nội dung bài đăng
+
+Bảng này chính là file Excel, mở ngay trong tool. Mỗi dòng một bài.
+
+![Tab Nội dung bài đăng](anh_huong_dan/noi_dung_bai_dang.png)
+
+Bốn cột: **STT** (mã định danh bài), **Nội dung bài**, **Phân loại** (bài đăng
+lên nhóm nào), **Thư mục ảnh**.
+
+| Nút | Làm gì |
+|---|---|
+| **+ Thêm bài** | Thêm một dòng mới |
+| **Xóa bài** | Bỏ dòng khỏi bảng (không xóa ảnh) |
+| **🗑 Xóa toàn bộ ảnh** | Dọn sạch ảnh **và video .mp4** trong thư mục ảnh của bài đang chọn |
+| **🖼 Ảnh của bài này** | Mở cửa sổ xem/thêm/xóa từng ảnh |
+| **⟳ Tải lại từ Excel** | Đọc lại file, bỏ mọi sửa chưa ghi |
+| **💾 Ghi vào file Excel** | **Bắt buộc bấm sau khi sửa**, không thì mất |
+
+**Sửa một bài: bấm đúp vào dòng đó.** Cửa sổ soạn bài mở ra, gõ xuống dòng
+thoải mái — Facebook giữ nguyên cách xuống dòng. Trong đó có nút
+**. Chấm câu cuối dòng** thêm dấu chấm vào cuối mọi dòng còn thiếu.
+
+> ⚠ **STT là mã định danh bài.** File chống đăng trùng ghi theo STT, nên đổi
+> STT của một bài cũ sẽ làm tool tưởng là bài khác và đăng lại, hoặc tưởng đã
+> đăng rồi mà bỏ qua.
+
+### Tab Nhóm theo phân loại
+
+Nơi khai link group. Chia hai cột.
+
+![Tab Nhóm theo phân loại](anh_huong_dan/nhom_theo_phan_loai.png)
+
+**Cột trái — danh sách phân loại.** "Phân loại" là cách gom nhóm lại: với phòng
+trọ thì mỗi quận một phân loại. Có **+ Thêm phân loại**, **Đổi tên**,
+**Xóa phân loại**, và mục **Chuyển sang máy khác** với 2 nút xuất/nhập (xem
+mục 5).
+
+**Cột phải — link group.** Mỗi dòng một link, dạng
+`https://www.facebook.com/groups/...`. Sửa xong bấm **💾 Lưu danh sách group**.
+
+Cách nó ăn khớp với bảng nội dung: bài nào có cột **Phân loại** ghi `Cầu Giấy`
+thì được đăng lên đúng những link nằm trong phân loại `Cầu Giấy`. Tên phải
+trùng nhau — tool có bỏ dấu và không phân biệt hoa thường khi so, nhưng viết
+sai chữ là bài đó không đăng đi đâu cả.
 
 ---
 
 ## 4. Bước 1 — Thêm nick Facebook
+
+> ⚠ **BẮT BUỘC: nick phải bật xác thực 2 lớp trước khi thêm vào tool.**
+> Chưa bật thì đừng thêm nick đó vào.
+
+**Vì sao bắt buộc:** nick chạy tool là nick Facebook để ý tới nhiều hơn bình
+thường — đăng đều, đăng nhiều nhóm, đăng từ máy chạy tự động. Chỉ có mật khẩu
+thì mất nick là mất luôn: người lấy được mật khẩu đăng nhập từ bất kỳ đâu cũng
+vào được. Bật 2 lớp rồi thì dù lộ mật khẩu, không có mã trên điện thoại bạn vẫn
+không ai vào được.
+
+Thêm một lý do thực tế: Facebook tin nick có 2 lớp hơn. Nick bật 2 lớp ít bị
+hỏi xác minh vặt hơn, và khi bị khoá tạm thì mở lại dễ hơn hẳn.
+
+### Bật xác thực 2 lớp trước khi làm tiếp
+
+1. Mở Facebook trên điện thoại hoặc máy tính, vào **Cài đặt & quyền riêng tư →
+   Cài đặt → Trung tâm tài khoản → Mật khẩu và bảo mật → Xác thực 2 yếu tố**.
+2. Chọn nick cần bật, chọn cách nhận mã.
+3. **Nên dùng ứng dụng tạo mã** (Google Authenticator, Microsoft Authenticator)
+   thay vì tin nhắn SMS — SMS bị tráo SIM là mất, mà đi nước ngoài hay đổi số
+   là cũng không nhận được mã.
+4. **Lưu lại mã khôi phục** Facebook đưa cho, cất chỗ khác máy chạy tool. Mất
+   điện thoại mà không có mã khôi phục là mất nick.
+
+Bật xong mới làm tiếp phần dưới.
+
+### Các bước thêm nick vào tool
 
 1. Vào tab **Tài khoản & Chạy**, bấm **+ Thêm nick mới**.
 2. Đặt tên gợi nhớ cho nick (ví dụ `nick_phu_1`) rồi OK.
 3. Một cửa sổ **Chrome** tự mở ra ở trang đăng nhập Facebook.
 4. **Đăng nhập Facebook ngay trong cửa sổ Chrome đó** — nhập tài khoản, mật
    khẩu, làm hết các bước xác minh (mã OTP, v.v.) nếu Facebook yêu cầu.
-5. Đăng nhập xong, **quay lại tool** và bấm nút **"Tôi đã đăng nhập xong"**.
+5. Facebook hỏi mã xác thực 2 lớp — mở ứng dụng tạo mã, nhập vào. Có ô
+   **"Ghi nhớ trình duyệt này"** thì tick, để lần sau không bị hỏi lại.
+6. Đăng nhập xong, **quay lại tool** và bấm nút **"Tôi đã đăng nhập xong"**.
 
 > Điểm hay bị nhầm: bấm nút "Tôi đã đăng nhập xong" **trong tool**, chứ không
 > phải chỉ đóng cửa sổ Chrome. Đóng Chrome mà chưa bấm nút thì phiên đăng nhập
 > có thể chưa được lưu.
 
-Xong, phiên được lưu vào `fb_profiles\`. **Lần sau không phải đăng nhập lại.**
+Xong, phiên được lưu vào `fb_profiles\`. **Lần sau không phải đăng nhập lại** —
+mã 2 lớp chỉ phải nhập lần đầu này thôi, không phải mỗi lần chạy tool.
 
 Thêm nhiều nick thì lặp lại các bước trên. Nick nào lỡ bị đăng xuất thì chọn
 nick đó trong danh sách rồi bấm **"Đăng nhập lại nick này"**.
@@ -122,6 +234,31 @@ group của quận đó.
 > ⚠ Nhớ tên phân loại — bước sau phải điền **trùng chính xác** tên này vào
 > Excel thì bài mới biết đăng lên đúng nhóm.
 
+### Mang danh sách nhóm sang máy khác
+
+Khai được vài chục nhóm rồi mà phải gõ lại trên máy mới thì rất mất công. Cột
+bên trái có mục **Chuyển sang máy khác** với 2 nút:
+
+- **⬆ Xuất ra file** — ghi toàn bộ phân loại + link group của chiến dịch đang
+  chọn ra một file `.json` nhỏ. Chép file đó sang máy mới bằng USB, Zalo, Drive
+  đều được.
+- **⬇ Nhập từ file** — trên máy mới, chọn file đó. Tool hỏi **Gộp thêm** (giữ
+  nguyên nhóm đang có, chỉ thêm cái mới, bỏ link trùng) hay **Thay hẳn** (xóa
+  sạch phân loại hiện tại rồi dùng y hệt file).
+
+File xuất ra **chỉ chứa nhóm theo phân loại**. Cố ý không mang theo:
+
+| Không có trong file | Vì sao |
+|---|---|
+| Đường dẫn file Excel, thư mục ảnh | Là đường dẫn đầy đủ của máy cũ, sang máy mới là sai hết. Máy mới giữ đường dẫn của nó |
+| Nick Facebook | Nick là cả một profile Chrome vài GB. Chép sang máy khác Facebook thấy đổi thiết bị, rất dễ bắt xác minh — nên đăng nhập lại bằng tay |
+| Lịch hẹn giờ | Mỗi lịch trỏ tới nick theo tên; máy mới chưa có nick đó thì tới giờ chạy sẽ lỗi |
+
+> ⚠ Những thứ phải **chép tay** khi đổi máy, không nút nào làm thay: file
+> `.xlsx`, các thư mục ảnh, và **các file `posted_log*.json`**. Quên file
+> posted_log là tool coi như chưa đăng gì, đăng lại từ đầu lên toàn bộ nhóm đã
+> đăng rồi.
+
 ---
 
 ## 6. Bước 3 — Soạn nội dung bài
@@ -129,8 +266,13 @@ group của quận đó.
 Có 2 cách, chọn 1:
 
 **Cách A — sửa ngay trong tool** (dễ hơn): vào tab **Nội dung bài đăng**, bấm
-**+ Thêm bài** để thêm, **Sửa bài** để sửa. Sửa xong **bắt buộc bấm
-💾 Ghi vào file Excel**, không thì mất.
+**+ Thêm bài** để thêm, **bấm đúp vào dòng** để sửa bài đó. Sửa xong **bắt buộc
+bấm 💾 Ghi vào file Excel**, không thì mất.
+
+Trong cửa sổ soạn bài có nút **. Chấm câu cuối dòng**: bấm một phát là thêm dấu
+chấm vào cuối mọi dòng còn thiếu. Nó bỏ qua dòng trống, dòng đã có dấu câu, và
+dòng không có chữ (hàng emoji, gạch phân cách). Bấm nhầm thì `Ctrl+Z` một lần
+là về như cũ.
 
 **Cách B — mở file Excel:** mở `phong_tro.xlsx`, điền theo đúng 4 cột dưới,
 lưu lại. Trong tool bấm **⟳ Tải lại từ Excel** để cập nhật.
@@ -167,6 +309,18 @@ bài, bấm **🖼 Ảnh của bài này**:
 | **Xóa ảnh đã chọn** | Giữ Ctrl chọn nhiều ảnh rồi xóa. Bấm đúp để xem trước |
 | **Xóa tất cả ảnh** | Dọn sạch thư mục cho đợt ảnh mới |
 | **Mở thư mục** | Mở Explorer đúng thư mục đó, để kéo thả ảnh từ Zalo vào |
+
+### Dọn sạch ảnh của một bài trong 1 nút
+
+Ngay trên thanh của tab **Nội dung bài đăng** có **🗑 Xóa toàn bộ ảnh**: chọn
+bài rồi bấm, nó xóa sạch ảnh **và cả video `.mp4`** trong thư mục ảnh của bài
+đó — không phải mở cửa sổ quản lý ảnh. Tiện cho kiểu thay ảnh theo đợt: xóa hết
+→ bỏ ảnh mới vào → chạy.
+
+Khác với **Xóa tất cả ảnh** trong cửa sổ quản lý ảnh ở chỗ nút kia chỉ xóa ảnh,
+để lại video. Video nằm lại chỉ chiếm chỗ vì tool không đăng được video.
+
+Trước khi xóa, tool hỏi lại và ghi rõ sẽ mất bao nhiêu ảnh, bao nhiêu video.
 
 **Xóa ảnh không bao giờ xóa thư mục** — thư mục vẫn nằm đó chờ bạn bỏ ảnh mới
 vào, nên cột D trong Excel không cần sửa gì cả. Đúng quy trình thay ảnh theo
@@ -425,6 +579,7 @@ Xếp theo mức độ quan trọng:
 | Hiện tượng | Cách xử lý |
 |---|---|
 | `Không tìm thấy Google Chrome trên máy này` | Cài Chrome tại https://www.google.com/chrome rồi mở lại tool |
+| `Không chạy được trình điều khiển trình duyệt` / `[WinError 2]` | Thiếu file `node.exe` trong thư mục tool — **không phải lỗi Chrome**. Xem dòng "Cần file" ngay dưới thông báo: thường do phần mềm diệt virus xóa mất (vào mục Cách ly khôi phục lại, rồi thêm thư mục tool vào danh sách loại trừ), hoặc giải nén thiếu file |
 | `⚠ Chưa có file: ...xlsx` | File Excel bị xóa/đổi chỗ. Vào tab "Dữ liệu chiến dịch" chỉ lại đường dẫn |
 | Không đọc được Excel | Đang mở file đó trong Excel. Đóng lại rồi bấm ⟳ Tải lại từ Excel |
 | Sửa nội dung rồi mà chạy vẫn ra bài cũ | Chưa bấm **💾 Ghi vào file Excel** sau khi sửa |

@@ -513,17 +513,44 @@ def login_facebook(p, profile_dir):
     return ok
 
 
-def is_logged_in(page):
-    """Session còn sống hay không. Chỉ coi là hết hạn khi Facebook đá về trang
-    login — không dựa vào việc render được tên nick, vì trang profile có thể
-    load chậm hoặc đổi layout."""
-    url = page.url.lower()
-    if "login" in url or "checkpoint" in url:
-        return False
-    if page.locator("input[name='email'], input[name='pass']").count() > 0:
-        return False
-    cookies = page.context.cookies("https://www.facebook.com")
-    return any(c["name"] == "c_user" for c in cookies)
+def is_logged_in(page, cho_giay=6):
+    """Phiên đăng nhập còn sống hay không, xét bằng cookie `c_user`.
+
+    Facebook chỉ cấp cookie `c_user` cho phiên đã đăng nhập, và cookie là của
+    cả cửa sổ Chrome chứ không riêng tab nào — nên nó trả lời được cả trường
+    hợp người dùng đăng nhập ở tab khác, điều mà bản cũ (chỉ soi tab đầu tiên)
+    không thấy.
+
+    Bản cũ xét URL và form đăng nhập TRƯỚC cookie, sinh ra ba kiểu báo nhầm:
+      - địa chỉ sau khi đăng nhập xong vẫn còn chữ "login"
+        (/login/device-based/regular/login/, ?login_source=...);
+      - vừa qua xong bước xác thực 2 lớp, địa chỉ còn chữ "checkpoint";
+      - Facebook nhúng sẵn form đăng nhập ẩn trong HTML nhiều trang, mà bản cũ
+        đếm cả phần tử ẩn.
+    Cả ba đều báo thất bại trong khi đăng nhập đã xong — đúng kiểu "dùng được
+    mà log vẫn báo lỗi".
+
+    Chờ tới `cho_giay` giây: người dùng hay bấm "Tôi đã đăng nhập xong" ngay khi
+    thấy trang chủ hiện ra, lúc Facebook còn đang chuyển hướng dở và cookie
+    chưa kịp ghi.
+
+    Lưu ý: hàm này chỉ trả lời "có phiên hay không". Nick đang bị Facebook bắt
+    xác minh vẫn còn cookie nên vẫn tính là đã đăng nhập — việc phát hiện
+    checkpoint là của kiem_tra_checkpoint(), có thông báo riêng rõ ràng hơn.
+    """
+    het_han = time.time() + cho_giay
+    while True:
+        try:
+            cookies = page.context.cookies()
+        except Exception:
+            cookies = []
+        for c in cookies:
+            if (c.get("name") == "c_user" and c.get("value")
+                    and c.get("domain", "").lstrip(".").endswith("facebook.com")):
+                return True
+        if time.time() >= het_han:
+            return False
+        time.sleep(1)
 
 
 def get_profile_name(page):
@@ -940,6 +967,16 @@ def run_posting(profile_dir, confirm_nick=None, campaign=None):
         log("Đang kiểm tra tài khoản Facebook...")
         page.goto("https://www.facebook.com/me", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
+        # Nick đang bị bắt xác minh thì vẫn còn cookie, is_logged_in vẫn đúng là
+        # "có phiên" — nên phải hỏi riêng, không thì chạy tiếp vào trang xác minh
+        # rồi hỏng giữa chừng với thông báo khó hiểu.
+        try:
+            kiem_tra_checkpoint(page)
+        except FacebookCheckpointError as e:
+            log(f"⛔ {e}")
+            context.close()
+            return None
+
         if is_logged_in(page):
             profile_name = get_profile_name(page)
             log(f"Đang đăng nhập với nick: {profile_name}")

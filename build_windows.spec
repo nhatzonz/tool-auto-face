@@ -17,6 +17,8 @@ automation nên không đăng nhập được. Vì vậy máy người dùng c�
 
 Vẫn phải gom package playwright vì nó cần driver Node.js để điều khiển Chrome.
 """
+import os
+
 from PyInstaller.utils.hooks import collect_all
 
 # Gom package playwright: driver Node.js và các file .js đi kèm
@@ -26,7 +28,14 @@ a = Analysis(
     ["gui.py"],
     pathex=[],
     binaries=pw_binaries,
-    datas=pw_datas,
+    # Nút "📖 Hướng dẫn sử dụng" đọc thẳng file .md này, nên nó phải nằm trong
+    # gói — thiếu là cửa sổ hướng dẫn mở ra trống trơn.
+    # Ảnh minh hoạ của mục 3: chỉ gói khi thư mục có ảnh thật, vì PyInstaller
+    # báo lỗi nếu trỏ vào thư mục rỗng. Thiếu ảnh thì hướng dẫn vẫn mở được,
+    # chỗ đó hiện dòng "[chưa có ảnh: ...]".
+    datas=pw_datas + [("HUONGDAN_NGUOI_DUNG.md", ".")] + (
+        [("anh_huong_dan", "anh_huong_dan")]
+        if os.path.isdir("anh_huong_dan") and os.listdir("anh_huong_dan") else []),
     hiddenimports=pw_hiddenimports + [
         # openpyxl nạp các module này động, PyInstaller không tự dò ra
         "openpyxl.cell._writer",

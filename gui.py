@@ -39,6 +39,8 @@ import paths
 paths.guard_missing_stdout()
 
 import auto_join as joiner
+import giao_dien
+import huong_dan
 import config as cfg_module
 import lich_hen
 import post_phong_tro_fb as bot
@@ -48,6 +50,25 @@ import tao_file_mau
 # Đuôi file nút "🗑 Xóa toàn bộ ảnh" dọn sạch: ảnh tool đăng được, cộng .mp4.
 # Để riêng .mp4 ra biến khác vì còn dùng để đếm và ghi rõ trong câu hỏi xác
 # nhận — xóa vĩnh viễn thì người bấm phải thấy trước mình sắp mất những gì.
+def _soc(chi_so):
+    """Tên tag tô nền xen kẽ cho dòng bảng — mắt dò theo hàng ngang đỡ lạc."""
+    return "soc" if chi_so % 2 else "thuong"
+
+
+def _mau_log(o_log):
+    """Màu cho các tag dòng log (xem App.DAU_DONG_MAU)."""
+    o_log.tag_configure("loi", foreground=giao_dien.NGUY_HIEM)
+    o_log.tag_configure("canh_bao", foreground=giao_dien.CANH_BAO)
+    o_log.tag_configure("tot", foreground=giao_dien.THANH_CONG)
+    o_log.tag_configure("phu", foreground=giao_dien.CHU_PHU)
+
+
+def _ke_soc(bang):
+    """Đăng ký màu cho tag của _soc() trên một Treeview."""
+    bang.tag_configure("soc", background=giao_dien.SOC)
+    bang.tag_configure("thuong", background=giao_dien.THE)
+
+
 DUOI_ANH = (".jpg", ".jpeg", ".png", ".webp")
 DUOI_VIDEO = (".mp4",)
 DUOI_XOA_HANG_LOAT = DUOI_ANH + DUOI_VIDEO
@@ -57,7 +78,11 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Tool đăng bài Facebook")
-        self.geometry("960x700")
+
+        # Phải gọi trước khi dựng widget: bảng màu cho tk.Text/tk.Listbox đi qua
+        # option database, mà option database chỉ ăn vào widget tạo ra sau đó.
+        giao_dien.ap_dung(self)
+        giao_dien.dat_kich_thuoc(self, 1160, 760, 860, 600)
 
         self.cfg = cfg_module.load_config()
         # Cấu hình cũ có thể còn 2 chiến dịch trỏ chung một file chống đăng
@@ -184,9 +209,11 @@ class App(tk.Tk):
         self.campaign_box.bind("<<ComboboxSelected>>", self.on_switch_campaign)
 
         ttk.Button(bar, text="+ Thêm", command=self.add_campaign).pack(side="left", padx=2)
-        ttk.Button(bar, text="Nhân bản", command=self.duplicate_campaign).pack(side="left", padx=2)
         ttk.Button(bar, text="Đổi tên", command=self.rename_campaign).pack(side="left", padx=2)
-        ttk.Button(bar, text="Xóa", command=self.delete_campaign).pack(side="left", padx=2)
+        ttk.Button(bar, text="Xóa", command=self.delete_campaign,
+                   style="NguyHiem.TButton").pack(side="left", padx=2)
+        ttk.Button(bar, text="📖 Hướng dẫn sử dụng",
+                   command=self.mo_huong_dan).pack(side="right", padx=8)
 
     def refresh_campaign_box(self):
         self.campaign_box["values"] = list(self.cfg["campaigns"])
@@ -260,6 +287,16 @@ class App(tk.Tk):
         self.refresh_campaign_box()
         self.load_campaign_into_views()
 
+    def mo_huong_dan(self):
+        """Mở cửa sổ hướng dẫn. Không grab_set: để người dùng vừa đọc vừa thao
+        tác trên tool, chứ bắt đóng hướng dẫn mới bấm được nút thì đọc xong lại
+        quên mất đang ở bước nào."""
+        if getattr(self, "_cua_so_hd", None) and self._cua_so_hd.winfo_exists():
+            self._cua_so_hd.lift()
+            self._cua_so_hd.focus_set()
+            return
+        self._cua_so_hd = huong_dan.CuaSoHuongDan(self)
+
     def rename_campaign(self):
         if self.dang_chay():
             return
@@ -328,31 +365,34 @@ class App(tk.Tk):
 
         ttk.Button(left, text="+ Thêm nick mới", command=self.add_account).pack(fill="x", padx=6, pady=2)
         ttk.Button(left, text="Đăng nhập lại nick này", command=self.relogin_account).pack(fill="x", padx=6, pady=2)
-        ttk.Button(left, text="Xóa nick", command=self.delete_account).pack(fill="x", padx=6, pady=(2, 8))
+        ttk.Button(left, text="Xóa nick", command=self.delete_account,
+                   style="NguyHiem.TButton").pack(fill="x", padx=6, pady=(2, 8))
 
         right = ttk.Frame(f)
         right.pack(side="left", fill="both", expand=True, pady=4)
 
-        bar = ttk.Frame(right)
+        bar = giao_dien.HangNut(right)
         bar.pack(fill="x", pady=(0, 6))
-        self.btn_start = ttk.Button(bar, text="▶ Bắt đầu đăng", command=self.start_posting)
-        self.btn_start.pack(side="left")
-        self.btn_stop = ttk.Button(bar, text="■ Dừng", command=self.request_stop, state="disabled")
-        self.btn_stop.pack(side="left", padx=6)
-        self.btn_check = ttk.Button(bar, text="🔍 Kiểm tra dữ liệu", command=self.kiem_tra)
-        self.btn_check.pack(side="left", padx=(0, 6))
+        self.btn_start = bar.them(
+            ttk.Button(bar, text="▶ Bắt đầu đăng", command=self.start_posting,
+                       style="Nhan.TButton"))
+        self.btn_stop = bar.them(
+            ttk.Button(bar, text="■ Dừng", command=self.request_stop, state="disabled",
+                       style="NguyHiem.TButton"))
+        self.btn_check = bar.them(
+            ttk.Button(bar, text="🔍 Kiểm tra dữ liệu", command=self.kiem_tra))
         # Tên nút phải nói rõ nó xóa cái gì: một nút chỉ dọn chữ trên màn hình,
         # nút kia xóa file chống đăng trùng — nhầm cái thứ hai là cả loạt bài cũ
         # lên Facebook lần nữa.
-        ttk.Button(bar, text="Xóa màn hình log",
-                   command=self.xoa_man_hinh_log).pack(side="left")
-        ttk.Button(bar, text="🗑 Xóa lịch sử đã đăng",
-                   command=self.xoa_lich_su_dang).pack(side="left", padx=6)
+        bar.them(ttk.Button(bar, text="Xóa màn hình log", command=self.xoa_man_hinh_log), 12)
+        bar.them(ttk.Button(bar, text="🗑 Xóa lịch sử đã đăng", command=self.xoa_lich_su_dang,
+                            style="NguyHiem.TButton"))
 
         self.status = ttk.Label(right, text="Sẵn sàng.")
         self.status.pack(anchor="w", pady=(0, 4))
 
-        self.log_box = tk.Text(right, wrap="word", height=25, font=("Menlo", 11))
+        self.log_box = tk.Text(right, wrap="word", height=25, font="TkFixedFont")
+        _mau_log(self.log_box)
         scroll = ttk.Scrollbar(right, command=self.log_box.yview)
         self.log_box.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
@@ -403,15 +443,30 @@ class App(tk.Tk):
 
         win = tk.Toplevel(self)
         win.title(f"Đăng nhập: {name}")
-        win.geometry("420x160")
+        giao_dien.dat_kich_thuoc(win, 520, 280, 420, 240)
+        # Nhắc bật 2 lớp đúng lúc người dùng sắp gõ mật khẩu — viết trong tài
+        # liệu thôi thì phần lớn không đọc tới.
+        ttk.Label(
+            win,
+            text="⚠ Nick dùng cho tool BẮT BUỘC phải bật xác thực 2 lớp.",
+            style="CanhBao.TLabel", justify="left", wraplength=460,
+        ).pack(padx=16, pady=(16, 2), anchor="w")
+        ttk.Label(
+            win,
+            text="Chưa bật thì dừng lại, vào Facebook bật trước rồi hãy đăng nhập ở đây.\n"
+                 "Mã 2 lớp chỉ phải nhập lần này, các lần chạy sau không hỏi lại.",
+            style="Phu.TLabel", justify="left", wraplength=460,
+        ).pack(padx=16, anchor="w")
+        ttk.Separator(win).pack(fill="x", padx=16, pady=10)
         ttk.Label(
             win,
             text=f"Chrome đang mở cho nick '{name}'.\n"
                  "Hãy đăng nhập Facebook trong cửa sổ Chrome đó,\n"
                  "xong rồi quay lại đây bấm nút bên dưới.",
             justify="left",
-        ).pack(padx=16, pady=16)
-        ttk.Button(win, text="Tôi đã đăng nhập xong", command=done.set).pack(pady=4)
+        ).pack(padx=16, pady=(0, 12), anchor="w")
+        ttk.Button(win, text="Tôi đã đăng nhập xong", command=done.set,
+                   style="Nhan.TButton").pack(pady=4)
         win.protocol("WM_DELETE_WINDOW", done.set)
 
         def work():
@@ -671,8 +726,15 @@ class App(tk.Tk):
             "  • Tắt ô 'Chống đăng trùng' ở tab 'Dữ liệu chiến dịch'\n\n"
             "Để nguyên thì sang ngày mai các bài này lại đăng được bình thường.")
 
+    # Log chạy hàng trăm dòng, đọc toàn chữ đen rất khó nhặt ra dòng hỏng.
+    # Tô theo ký hiệu đầu dòng mà code vẫn đang dùng sẵn, không phải đổi gì ở
+    # chỗ sinh ra log.
+    DAU_DONG_MAU = {"✗": "loi", "⚠": "canh_bao", "✓": "tot", "🗑": "phu",
+                    "⬆": "phu", "⬇": "phu", "🖼": "phu"}
+
     def append_log(self, text):
-        self.log_box.insert("end", text + "\n")
+        tag = self.DAU_DONG_MAU.get(text.lstrip()[:1], "")
+        self.log_box.insert("end", text + "\n", tag)
         self.log_box.see("end")
 
     def _drain_log_queue(self):
@@ -707,38 +769,45 @@ class App(tk.Tk):
         f = self.tab_data
         self.excel_rows = []        # [{stt, noi_dung, phan_loai, folder}, ...]
 
-        bar = ttk.Frame(f)
+        bar = giao_dien.HangNut(f)
         bar.pack(fill="x", pady=6)
-        ttk.Button(bar, text="+ Thêm bài", command=self.add_row).pack(side="left")
+        bar.them(ttk.Button(bar, text="+ Thêm bài", command=self.add_row))
         # Nút "Sửa bài" tạm ẩn theo yêu cầu — bấm đúp vào dòng vẫn mở được hộp
         # thoại sửa như cũ (xem binding <Double-1> ở cuối hàm này).
-        # ttk.Button(bar, text="Sửa bài", command=self.edit_row).pack(side="left", padx=4)
-        ttk.Button(bar, text="Xóa bài", command=self.delete_row).pack(side="left")
-        ttk.Button(bar, text="🗑 Xóa toàn bộ ảnh", command=self.xoa_toan_bo_anh).pack(side="left", padx=4)
-        ttk.Button(bar, text="🖼 Ảnh của bài này", command=self.quan_ly_anh).pack(side="left", padx=12)
-        ttk.Button(bar, text="⟳ Tải lại từ Excel", command=self.load_excel).pack(side="left", padx=12)
-        ttk.Button(bar, text="💾 Ghi vào file Excel", command=self.save_excel).pack(side="left")
+        bar.them(ttk.Button(bar, text="Xóa bài", command=self.delete_row,
+                            style="NguyHiem.TButton"))
+        bar.them(ttk.Button(bar, text="🗑 Xóa toàn bộ ảnh", command=self.xoa_toan_bo_anh,
+                            style="NguyHiem.TButton"))
+        bar.them(ttk.Button(bar, text="🖼 Ảnh của bài này", command=self.quan_ly_anh), 12)
+        bar.them(ttk.Button(bar, text="⟳ Tải lại từ Excel", command=self.load_excel), 12)
+        bar.them(ttk.Button(bar, text="💾 Ghi vào file Excel", command=self.save_excel,
+                            style="Nhan.TButton"))
 
         ttk.Label(
             f,
             text="STT là mã định danh của bài — file chống đăng trùng ghi theo STT. "
                  "Đổi STT của bài cũ sẽ làm tool đăng lại hoặc bỏ sót bài.",
-            foreground="#a05000",
+            style="CanhBao.TLabel",
         ).pack(anchor="w", padx=2, pady=(4, 0))
 
-        self.excel_status = ttk.Label(f, text="", foreground="#555")
+        self.excel_status = ttk.Label(f, text="", style="Phu.TLabel")
         self.excel_status.pack(anchor="w", padx=2, pady=(0, 4))
 
         cols = ("stt", "noi_dung", "phan_loai", "folder")
         self.data_tree = ttk.Treeview(f, columns=cols, show="headings", height=18)
-        for col, title, width in [
-            ("stt", "STT", 50),
-            ("noi_dung", "Nội dung bài", 520),
-            ("phan_loai", "Phân loại", 150),
-            ("folder", "Thư mục ảnh", 140),
+        _ke_soc(self.data_tree)
+        # stretch=True chỉ cho cột nội dung: kéo rộng cửa sổ thì phần thừa dồn
+        # hết vào đó. Để mặc định (mọi cột cùng nở) thì cột STT rộng ra vô ích
+        # còn nội dung vẫn bị cắt.
+        for col, title, width, nho_nhat, gian in [
+            ("stt", "STT", 56, 46, False),
+            ("noi_dung", "Nội dung bài", 520, 220, True),
+            ("phan_loai", "Phân loại", 150, 90, False),
+            ("folder", "Thư mục ảnh", 140, 90, False),
         ]:
             self.data_tree.heading(col, text=title)
-            self.data_tree.column(col, width=width, anchor="w")
+            self.data_tree.column(col, width=width, minwidth=nho_nhat,
+                                  stretch=gian, anchor="w")
 
         vs = ttk.Scrollbar(f, orient="vertical", command=self.data_tree.yview)
         self.data_tree.configure(yscrollcommand=vs.set)
@@ -755,12 +824,13 @@ class App(tk.Tk):
         """
         self.excel_rows.sort(key=lambda r: (r["stt"] is None, r["stt"] or 0))
         self.data_tree.delete(*self.data_tree.get_children())
-        for row in self.excel_rows:
+        for i, row in enumerate(self.excel_rows):
             preview = row["noi_dung"].replace("\n", " ⏎ ")
             if len(preview) > 90:
                 preview = preview[:90] + "..."
             self.data_tree.insert(
-                "", "end", values=(row["stt"], preview, row["phan_loai"], row["folder"]))
+                "", "end", tags=(_soc(i),),
+                values=(row["stt"], preview, row["phan_loai"], row["folder"]))
 
     def quan_ly_anh(self):
         """Mở cửa sổ xem/xóa/thêm ảnh cho thư mục ảnh của bài đang chọn."""
@@ -1031,12 +1101,15 @@ class App(tk.Tk):
     def _build_paths_tab(self):
         f = self.tab_paths
         self.path_vars = {}
+        # Cột 1 chứa ô nhập đường dẫn — cho nó ăn hết chỗ thừa khi kéo rộng cửa
+        # sổ, vì đường dẫn dài mới là thứ cần nhìn rõ ở tab này.
+        f.columnconfigure(1, weight=1)
 
         hint = ttk.Label(
             f,
             text="File Excel cần 4 cột:  A = STT  |  B = Nội dung bài  |  "
                  "C = Phân loại  |  D = Tên thư mục ảnh (để trống nếu không đăng ảnh)",
-            foreground="#555",
+            style="Phu.TLabel",
         )
         hint.grid(row=0, column=0, columnspan=3, sticky="w", padx=6, pady=(8, 12))
 
@@ -1090,10 +1163,11 @@ class App(tk.Tk):
             f,
             text="Tắt ô này thì tool đăng bất chấp lịch sử — cùng bài có thể lên "
                  "cùng nhóm nhiều lần trong ngày, Facebook rất dễ đánh dấu spam.",
-            foreground="#a05000", wraplength=560, justify="left",
+            style="CanhBao.TLabel", wraplength=560, justify="left",
         ).grid(row=17, column=0, columnspan=3, sticky="w", padx=26, pady=(0, 4))
 
-        ttk.Button(f, text="💾 Lưu cấu hình chiến dịch", command=self.save_paths) \
+        ttk.Button(f, text="💾 Lưu cấu hình chiến dịch", command=self.save_paths,
+                   style="Nhan.TButton") \
             .grid(row=20, column=0, sticky="w", padx=6, pady=16)
         f.columnconfigure(1, weight=1)
 
@@ -1190,10 +1264,11 @@ class App(tk.Tk):
 
         ttk.Button(left, text="+ Thêm phân loại", command=self.add_category).pack(fill="x", padx=6, pady=2)
         ttk.Button(left, text="Đổi tên", command=self.rename_category).pack(fill="x", padx=6, pady=2)
-        ttk.Button(left, text="Xóa phân loại", command=self.delete_category).pack(fill="x", padx=6, pady=(2, 8))
+        ttk.Button(left, text="Xóa phân loại", command=self.delete_category,
+                   style="NguyHiem.TButton").pack(fill="x", padx=6, pady=(2, 8))
 
         ttk.Separator(left).pack(fill="x", padx=6, pady=(0, 6))
-        ttk.Label(left, text="Chuyển sang máy khác", foreground="#777").pack(anchor="w", padx=6)
+        ttk.Label(left, text="Chuyển sang máy khác", style="Phu.TLabel").pack(anchor="w", padx=6)
         ttk.Button(left, text="⬆ Xuất ra file", command=self.xuat_nhom).pack(fill="x", padx=6, pady=2)
         ttk.Button(left, text="⬇ Nhập từ file", command=self.nhap_nhom).pack(fill="x", padx=6, pady=(2, 8))
 
@@ -1204,13 +1279,14 @@ class App(tk.Tk):
             right,
             text="Tên phân loại phải khớp với cột C trong Excel (so khớp bỏ dấu, "
                  "không phân biệt hoa thường).",
-            foreground="#555",
+            style="Phu.TLabel",
         ).pack(anchor="w", padx=6, pady=(6, 0))
 
-        self.url_box = tk.Text(right, wrap="none", font=("Menlo", 11))
+        self.url_box = tk.Text(right, wrap="none", font="TkFixedFont")
         self.url_box.pack(fill="both", expand=True, padx=6, pady=6)
 
-        ttk.Button(right, text="💾 Lưu danh sách group", command=self.save_groups) \
+        ttk.Button(right, text="💾 Lưu danh sách group", command=self.save_groups,
+                   style="Nhan.TButton") \
             .pack(anchor="w", padx=6, pady=(0, 8))
 
     def refresh_categories(self):
@@ -1456,7 +1532,7 @@ class App(tk.Tk):
 
         dong_ho = ttk.Frame(f)
         dong_ho.pack(fill="x", padx=4)
-        self.lbl_dong_ho = ttk.Label(dong_ho, text="", font=("Menlo", 12))
+        self.lbl_dong_ho = ttk.Label(dong_ho, text="", font="TkFixedFont")
         self.lbl_dong_ho.pack(side="left", pady=4)
 
         self.tu_mo_var = tk.BooleanVar(value=lich_hen.dang_tu_mo())
@@ -1469,13 +1545,16 @@ class App(tk.Tk):
 
         cot = ("bat", "lich", "camp", "nick", "ke_tiep", "chay_cuoi")
         self.lich_tree = ttk.Treeview(f, columns=cot, show="headings", height=12)
-        for ma, ten, rong in (
-            ("bat", "Bật", 50), ("lich", "Lịch", 200), ("camp", "Chiến dịch", 150),
-            ("nick", "Nick", 130), ("ke_tiep", "Lần chạy tới", 140),
-            ("chay_cuoi", "Chạy gần nhất", 140),
+        _ke_soc(self.lich_tree)
+        for ma, ten, rong, nho_nhat, gian in (
+            ("bat", "Bật", 50, 44, False), ("lich", "Lịch", 220, 140, True),
+            ("camp", "Chiến dịch", 150, 100, False), ("nick", "Nick", 130, 80, False),
+            ("ke_tiep", "Lần chạy tới", 140, 110, False),
+            ("chay_cuoi", "Chạy gần nhất", 140, 110, False),
         ):
             self.lich_tree.heading(ma, text=ten)
-            self.lich_tree.column(ma, width=rong, anchor="w")
+            self.lich_tree.column(ma, width=rong, minwidth=nho_nhat,
+                                  stretch=gian, anchor="w")
         self.lich_tree.pack(fill="both", expand=True, padx=4, pady=6)
         self.lich_tree.bind("<Double-1>", lambda _e: self.sua_lich())
 
@@ -1516,9 +1595,9 @@ class App(tk.Tk):
         if not hasattr(self, "lich_tree"):
             return
         self.lich_tree.delete(*self.lich_tree.get_children())
-        for l in self.danh_sach_lich():
+        for i, l in enumerate(self.danh_sach_lich()):
             ke_tiep = lich_hen.lan_ke_tiep(l) if l.get("bat") else None
-            self.lich_tree.insert("", "end", iid=l["id"], values=(
+            self.lich_tree.insert("", "end", iid=l["id"], tags=(_soc(i),), values=(
                 "✓" if l.get("bat") else "—",
                 lich_hen.mo_ta(l),
                 l.get("campaign") or "?",
@@ -1785,7 +1864,7 @@ class App(tk.Tk):
         ttk.Label(
             left,
             text="Lịch sử tham gia ghi theo từng\nnick, nằm trong profile của\nnick đó.",
-            foreground="#555", justify="left",
+            style="Phu.TLabel", justify="left",
         ).pack(anchor="w", padx=6, pady=(0, 8))
 
         right = ttk.Frame(f)
@@ -1795,20 +1874,19 @@ class App(tk.Tk):
         khung_ds = ttk.LabelFrame(right, text="Danh sách nhóm muốn tham gia")
         khung_ds.pack(fill="both", expand=True)
 
-        thanh = ttk.Frame(khung_ds)
+        thanh = giao_dien.HangNut(khung_ds)
         thanh.pack(fill="x", padx=6, pady=6)
-        ttk.Button(thanh, text="+ Dán link nhóm", command=self.them_link_nhom).pack(side="left")
-        ttk.Button(thanh, text="Nạp từ chiến dịch...", command=self.nap_link_tu_chien_dich) \
-            .pack(side="left", padx=4)
-        ttk.Button(thanh, text="📋 Sao chép link", command=self.sao_chep_link).pack(side="left")
-        ttk.Button(thanh, text="☑ Tick hết", command=lambda: self.tick_tat_ca(True)) \
-            .pack(side="left", padx=(4, 0))
-        ttk.Button(thanh, text="☐ Bỏ tick", command=lambda: self.tick_tat_ca(False)) \
-            .pack(side="left", padx=4)
-        ttk.Button(thanh, text="Xóa nhóm đã tick", command=self.xoa_link_da_chon).pack(side="left")
-        ttk.Button(thanh, text="Xóa hết", command=self.xoa_het_link).pack(side="left", padx=4)
-        self.join_dem = ttk.Label(thanh, text="", foreground="#555")
-        self.join_dem.pack(side="left", padx=8)
+        thanh.them(ttk.Button(thanh, text="+ Dán link nhóm", command=self.them_link_nhom))
+        thanh.them(ttk.Button(thanh, text="Nạp từ chiến dịch...",
+                              command=self.nap_link_tu_chien_dich), 4)
+        thanh.them(ttk.Button(thanh, text="📋 Sao chép link", command=self.sao_chep_link), 4)
+        thanh.them(ttk.Button(thanh, text="☑ Tick hết", command=lambda: self.tick_tat_ca(True)), 12)
+        thanh.them(ttk.Button(thanh, text="☐ Bỏ tick", command=lambda: self.tick_tat_ca(False)), 4)
+        thanh.them(ttk.Button(thanh, text="Xóa nhóm đã tick", command=self.xoa_link_da_chon,
+                              style="NguyHiem.TButton"), 12)
+        thanh.them(ttk.Button(thanh, text="Xóa hết", command=self.xoa_het_link,
+                              style="NguyHiem.TButton"), 4)
+        self.join_dem = thanh.them(ttk.Label(thanh, text="", style="Phu.TLabel"), 12)
 
         # Treeview không có checkbox thật, nên cột đầu là ô chữ ☐/☑ và bắt
         # click vào đúng cột đó. Dùng ô tick thay vì "dòng đang bôi đen" vì bôi
@@ -1817,14 +1895,15 @@ class App(tk.Tk):
         cot = ("chon", "link", "trang_thai", "thoi_gian")
         self.join_tree = ttk.Treeview(khung_ds, columns=cot, show="headings",
                                       height=9, selectmode="extended")
+        _ke_soc(self.join_tree)
         self.join_tree.heading("chon", text="✓", command=self.doi_tick_tat_ca)
         self.join_tree.heading("link", text="Link nhóm")
         self.join_tree.heading("trang_thai", text="Trạng thái với nick đang chọn")
         self.join_tree.heading("thoi_gian", text="Lần gần nhất")
-        self.join_tree.column("chon", width=34, anchor="center", stretch=False)
-        self.join_tree.column("link", width=360)
-        self.join_tree.column("trang_thai", width=180)
-        self.join_tree.column("thoi_gian", width=130)
+        self.join_tree.column("chon", width=34, minwidth=30, anchor="center", stretch=False)
+        self.join_tree.column("link", width=360, minwidth=200, stretch=True)
+        self.join_tree.column("trang_thai", width=180, minwidth=120, stretch=False)
+        self.join_tree.column("thoi_gian", width=130, minwidth=100, stretch=False)
         self.join_tree.bind("<Button-1>", self._bam_vao_bang)
         self.join_tree.bind("<space>", lambda _e: self._doi_tick(self.join_tree.selection()))
         self.join_tree.bind("<Control-c>", lambda _e: self.sao_chep_link())
@@ -1871,7 +1950,8 @@ class App(tk.Tk):
             variable=self.nick_moi_var,
         ).grid(row=5, column=0, columnspan=4, sticky="w", padx=6, pady=(6, 2))
 
-        ttk.Button(khung_cd, text="💾 Lưu cài đặt", command=self.luu_cai_dat_join) \
+        ttk.Button(khung_cd, text="💾 Lưu cài đặt", command=self.luu_cai_dat_join,
+                   style="Nhan.TButton") \
             .grid(row=0, column=4, rowspan=3, padx=12)
         ttk.Button(khung_cd, text="Bỏ tạm nghỉ của nick", command=self.bo_tam_nghi_nick) \
             .grid(row=3, column=4, padx=12)
@@ -1885,25 +1965,26 @@ class App(tk.Tk):
                  "nhóm. Bấm xong luôn kiểm chứng nút có đổi trạng thái không — 2 lần "
                  "bấm không ăn thua là coi như đang bị chặn ngầm: dừng và khoá nick "
                  "lại vài chục tiếng, không cho chạy tiếp.",
-            foreground="#a05000", wraplength=640, justify="left",
+            style="CanhBao.TLabel", wraplength=640, justify="left",
         ).grid(row=6, column=0, columnspan=5, sticky="w", padx=6, pady=(4, 6))
 
         # --- Nút chạy + log riêng ---
-        thanh2 = ttk.Frame(right)
+        thanh2 = giao_dien.HangNut(right)
         thanh2.pack(fill="x", pady=(0, 4))
-        self.btn_join_chon = ttk.Button(thanh2, text="▶ Tham gia nhóm đã tick",
-                                        command=lambda: self.bat_dau_join(chi_chon=True))
-        self.btn_join_chon.pack(side="left")
-        self.btn_join_all = ttk.Button(thanh2, text="▶ Tham gia tất cả nhóm chưa vào",
-                                       command=lambda: self.bat_dau_join(chi_chon=False))
-        self.btn_join_all.pack(side="left", padx=6)
-        self.btn_join_stop = ttk.Button(thanh2, text="■ Dừng",
-                                        command=self.request_stop, state="disabled")
-        self.btn_join_stop.pack(side="left")
-        ttk.Button(thanh2, text="Xóa màn hình log",
-                   command=lambda: self.join_log_box.delete("1.0", "end")).pack(side="left", padx=6)
+        self.btn_join_chon = thanh2.them(
+            ttk.Button(thanh2, text="▶ Tham gia nhóm đã tick", style="Nhan.TButton",
+                       command=lambda: self.bat_dau_join(chi_chon=True)))
+        self.btn_join_all = thanh2.them(
+            ttk.Button(thanh2, text="▶ Tham gia tất cả nhóm chưa vào",
+                       command=lambda: self.bat_dau_join(chi_chon=False)))
+        self.btn_join_stop = thanh2.them(
+            ttk.Button(thanh2, text="■ Dừng", command=self.request_stop,
+                       state="disabled", style="NguyHiem.TButton"))
+        thanh2.them(ttk.Button(thanh2, text="Xóa màn hình log",
+                               command=lambda: self.join_log_box.delete("1.0", "end")), 12)
 
-        self.join_log_box = tk.Text(right, wrap="word", height=10, font=("Menlo", 11))
+        self.join_log_box = tk.Text(right, wrap="word", height=10, font="TkFixedFont")
+        _mau_log(self.join_log_box)
         cuon2 = ttk.Scrollbar(right, command=self.join_log_box.yview)
         self.join_log_box.configure(yscrollcommand=cuon2.set)
         cuon2.pack(side="right", fill="y")
@@ -1950,11 +2031,11 @@ class App(tk.Tk):
         # Bỏ khỏi danh sách tick những link không còn trong bảng nữa
         self.join_da_tick &= {joiner.clean_group_url(u) for u in links}
 
-        for url in links:
+        for i, url in enumerate(links):
             muc = joiner.muc_nhom(lich_su, url) if acc else {}
             mo_ta = joiner.mo_ta_trang_thai(muc) if acc else "—"
             danh_dau = "☑" if joiner.clean_group_url(url) in self.join_da_tick else "☐"
-            self.join_tree.insert("", "end",
+            self.join_tree.insert("", "end", tags=(_soc(i),),
                                   values=(danh_dau, url, mo_ta, muc.get("time", "")))
 
         if not acc:
@@ -2366,7 +2447,7 @@ class App(tk.Tk):
                              "— các nhóm đó sẽ được kiểm tra lại.")
 
     def append_join_log(self, text):
-        self.join_log_box.insert("end", text + "\n")
+        self.join_log_box.insert("end", text + "\n", self.DAU_DONG_MAU.get(text.lstrip()[:1], ""))
         self.join_log_box.see("end")
 
     def _drain_join_log_queue(self):
@@ -2454,7 +2535,7 @@ class XoaLichSuDang(tk.Toplevel):
         super().__init__(parent)
         self.app = parent
         self.title("Xóa lịch sử đã đăng")
-        self.geometry("680x420")
+        giao_dien.dat_kich_thuoc(self, 720, 460, 560, 360)
         self.transient(parent)
         self.grab_set()
 
@@ -2467,7 +2548,7 @@ class XoaLichSuDang(tk.Toplevel):
 
         khung = ttk.Frame(self)
         khung.pack(fill="both", expand=True, padx=14)
-        self.danh_sach = tk.Listbox(khung, selectmode="extended", font=("Menlo", 11))
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", font="TkFixedFont")
         thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
         self.danh_sach.configure(yscrollcommand=thanh.set)
         thanh.pack(side="right", fill="y")
@@ -2477,12 +2558,13 @@ class XoaLichSuDang(tk.Toplevel):
             self,
             text="Xóa xong, lần chạy tới tool sẽ đăng LẠI TỪ ĐẦU toàn bộ bài của "
                  "chiến dịch đó lên mọi nhóm — kể cả bài đã lên Facebook rồi.",
-            foreground="#a05000", wraplength=640, justify="left",
+            style="CanhBao.TLabel", wraplength=640, justify="left",
         ).pack(anchor="w", padx=14, pady=8)
 
         bar = ttk.Frame(self)
         bar.pack(fill="x", padx=14, pady=(0, 14))
-        ttk.Button(bar, text="🗑 Xóa lịch sử đã chọn", command=self.xoa).pack(side="left")
+        ttk.Button(bar, text="🗑 Xóa lịch sử đã chọn", command=self.xoa,
+                   style="NguyHiem.TButton").pack(side="left")
         ttk.Button(bar, text="Đóng", command=self.destroy).pack(side="right")
 
         self.nap_lai()
@@ -2557,22 +2639,22 @@ class QuanLyAnh(tk.Toplevel):
         super().__init__(parent)
         self.thu_muc = thu_muc
         self.title(f"Ảnh: {nhan}")
-        self.geometry("640x520")
+        giao_dien.dat_kich_thuoc(self, 680, 560, 520, 380)
         self.transient(parent)
         self.grab_set()
 
-        ttk.Label(self, text=thu_muc, foreground="#555").pack(
+        ttk.Label(self, text=thu_muc, style="Phu.TLabel").pack(
             anchor="w", padx=14, pady=(12, 2))
 
         self.tom_tat = ttk.Label(self, text="")
         self.tom_tat.pack(anchor="w", padx=14)
-        self.canh_bao = ttk.Label(self, text="", foreground="#a05000",
+        self.canh_bao = ttk.Label(self, text="", style="CanhBao.TLabel",
                                   wraplength=600, justify="left")
         self.canh_bao.pack(anchor="w", padx=14, pady=(2, 6))
 
         khung = ttk.Frame(self)
         khung.pack(fill="both", expand=True, padx=14)
-        self.danh_sach = tk.Listbox(khung, selectmode="extended", font=("Menlo", 11))
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", font="TkFixedFont")
         thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
         self.danh_sach.configure(yscrollcommand=thanh.set)
         thanh.pack(side="right", fill="y")
@@ -2582,14 +2664,16 @@ class QuanLyAnh(tk.Toplevel):
         ttk.Label(
             self,
             text="Giữ Ctrl (hoặc Shift) để chọn nhiều ảnh. Bấm đúp để xem ảnh.",
-            foreground="#777",
+            style="Phu.TLabel",
         ).pack(anchor="w", padx=14, pady=(4, 0))
 
         bar = ttk.Frame(self)
         bar.pack(fill="x", padx=14, pady=12)
         ttk.Button(bar, text="+ Thêm ảnh...", command=self.them_anh).pack(side="left")
-        ttk.Button(bar, text="Xóa ảnh đã chọn", command=self.xoa_da_chon).pack(side="left", padx=4)
-        ttk.Button(bar, text="Xóa tất cả ảnh", command=self.xoa_tat_ca).pack(side="left")
+        ttk.Button(bar, text="Xóa ảnh đã chọn", command=self.xoa_da_chon,
+                   style="NguyHiem.TButton").pack(side="left", padx=4)
+        ttk.Button(bar, text="Xóa tất cả ảnh", command=self.xoa_tat_ca,
+                   style="NguyHiem.TButton").pack(side="left")
         ttk.Button(bar, text="Mở thư mục", command=self.mo_thu_muc).pack(side="left", padx=12)
         ttk.Button(bar, text="Đóng", command=self.destroy).pack(side="right")
 
@@ -2781,7 +2865,7 @@ class ChonGio(_Popup):
 
         bar = ttk.Frame(self)
         bar.pack(pady=(0, 10))
-        ttk.Button(bar, text="Chọn", command=self.ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Chọn", command=self.ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         self._bam_vao(neo, parent)
@@ -2853,7 +2937,7 @@ class ChonNgay(_Popup):
         self.luoi.pack(padx=10)
         for i, ten in enumerate(self.TEN_THU_NGAN):
             ttk.Label(self.luoi, text=ten, width=4, anchor="center",
-                      foreground="#c0392b" if i == 6 else "#333").grid(row=0, column=i, pady=2)
+                      foreground=giao_dien.NGUY_HIEM if i == 6 else giao_dien.CHU).grid(row=0, column=i, pady=2)
 
         bar = ttk.Frame(self)
         bar.pack(pady=8)
@@ -2913,7 +2997,7 @@ class LichEditor(tk.Toplevel):
     def __init__(self, parent, title, lich, campaigns=(), nicks=()):
         super().__init__(parent)
         self.title(title)
-        self.geometry("560x460")
+        giao_dien.dat_kich_thuoc(self, 600, 500, 480, 400)
         self.result = None
         self.lich = lich_hen.chuan_hoa(dict(lich))
         self.transient(parent)
@@ -2941,7 +3025,7 @@ class LichEditor(tk.Toplevel):
         self.nut_gio = ttk.Button(hop_gio, text="🕒", width=3, command=self._mo_chon_gio)
         self.nut_gio.pack(side="left", padx=4)
         ttk.Label(khung, text="bấm 🕒 để chọn, hoặc gõ dạng HH:MM",
-                  foreground="#777").grid(row=1, column=2, sticky="w", padx=8)
+                  style="Phu.TLabel").grid(row=1, column=2, sticky="w", padx=8)
 
         ttk.Label(khung, text="Ngày:").grid(row=2, column=0, sticky="w", pady=6)
         self.ngay_var = tk.StringVar(
@@ -2953,7 +3037,7 @@ class LichEditor(tk.Toplevel):
         self.nut_ngay = ttk.Button(hop_ngay, text="📅", width=3, command=self._mo_chon_ngay)
         self.nut_ngay.pack(side="left", padx=4)
         self.ghi_chu_ngay = ttk.Label(khung, text="bấm 📅 để chọn, hoặc gõ ngày/tháng/năm",
-                                      foreground="#777")
+                                      style="Phu.TLabel")
         self.ghi_chu_ngay.grid(row=2, column=2, sticky="w", padx=8)
 
         self.khung_thu = ttk.LabelFrame(khung, text="Lặp vào các thứ (không chọn gì = mọi ngày)")
@@ -2983,7 +3067,7 @@ class LichEditor(tk.Toplevel):
 
         bar = ttk.Frame(self)
         bar.pack(pady=(0, 14))
-        ttk.Button(bar, text="Lưu", command=self.ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Lưu", command=self.ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         self._doi_kieu()
@@ -3071,7 +3155,7 @@ class RowEditor(tk.Toplevel):
     def __init__(self, parent, title, row=None, categories=(), goi_y_stt=None):
         super().__init__(parent)
         self.title(title)
-        self.geometry("680x520")
+        giao_dien.dat_kich_thuoc(self, 720, 560, 560, 420)
         self.result = None
         self.transient(parent)
         self.grab_set()
@@ -3086,11 +3170,11 @@ class RowEditor(tk.Toplevel):
         thanh_text.pack(fill="x", padx=14, pady=(0, 4))
         ttk.Button(thanh_text, text=". Chấm câu cuối dòng",
                    command=self.cham_cau).pack(side="left")
-        self.bao_cham_cau = ttk.Label(thanh_text, text="", foreground="#777")
+        self.bao_cham_cau = ttk.Label(thanh_text, text="", style="Phu.TLabel")
         self.bao_cham_cau.pack(side="left", padx=10)
 
         # undo=True để bấm nhầm nút chấm câu còn Ctrl/Cmd+Z lấy lại được
-        self.text = tk.Text(self, wrap="word", height=14, font=("Menlo", 12), undo=True)
+        self.text = tk.Text(self, wrap="word", height=14, font="TkFixedFont", undo=True)
         self.text.pack(fill="both", expand=True, padx=14)
         self.text.insert("1.0", row["noi_dung"])
         self.text.edit_reset()      # nội dung nạp sẵn không tính là một bước undo
@@ -3102,25 +3186,25 @@ class RowEditor(tk.Toplevel):
         self.stt_var = tk.StringVar(value="" if row["stt"] is None else str(row["stt"]))
         ttk.Entry(grid, textvariable=self.stt_var, width=8).grid(row=0, column=1, sticky="w", padx=8)
         ttk.Label(grid, text="(mã định danh bài — đừng đổi nếu bài đã từng đăng)",
-                  foreground="#a05000").grid(row=0, column=2, sticky="w")
+                  style="CanhBao.TLabel").grid(row=0, column=2, sticky="w")
 
         ttk.Label(grid, text="Phân loại:").grid(row=1, column=0, sticky="w", pady=4)
         self.cat_var = tk.StringVar(value=row["phan_loai"])
         # Combobox cho chọn nhanh nhưng vẫn gõ tay được nếu muốn phân loại mới
         ttk.Combobox(grid, textvariable=self.cat_var, values=list(categories), width=28) \
             .grid(row=0, column=1, sticky="w", padx=8)
-        ttk.Label(grid, text="(phải khớp tên nhóm đã khai)", foreground="#777") \
+        ttk.Label(grid, text="(phải khớp tên nhóm đã khai)", style="Phu.TLabel") \
             .grid(row=0, column=2, sticky="w")
 
         ttk.Label(grid, text="Thư mục ảnh:").grid(row=1, column=0, sticky="w", pady=4)
         self.folder_var = tk.StringVar(value=row["folder"])
         ttk.Entry(grid, textvariable=self.folder_var, width=30).grid(row=1, column=1, sticky="w", padx=8)
-        ttk.Label(grid, text="(tên thư mục con, để trống nếu không đăng ảnh)", foreground="#777") \
+        ttk.Label(grid, text="(tên thư mục con, để trống nếu không đăng ảnh)", style="Phu.TLabel") \
             .grid(row=1, column=2, sticky="w")
 
         bar = ttk.Frame(self)
         bar.pack(pady=(0, 14))
-        ttk.Button(bar, text="Lưu", command=self.ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Lưu", command=self.ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         self.text.focus_set()
@@ -3218,7 +3302,7 @@ class SimplePrompt(tk.Toplevel):
 
         bar = ttk.Frame(self)
         bar.pack(pady=12)
-        ttk.Button(bar, text="OK", command=ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="OK", command=ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
         entry.bind("<Return>", lambda _e: ok())
 
@@ -3246,7 +3330,7 @@ class ChonCachNhap(tk.Toplevel):
             self,
             text="Gộp thêm   — giữ nguyên nhóm đang có, chỉ thêm nhóm mới, bỏ link trùng.\n"
                  "Thay hẳn   — xóa sạch phân loại hiện tại rồi dùng y hệt file.",
-            foreground="#555", justify="left",
+            style="Phu.TLabel", justify="left",
         ).pack(padx=16, pady=10, anchor="w")
 
         def chon(gia_tri):
@@ -3256,7 +3340,8 @@ class ChonCachNhap(tk.Toplevel):
         bar = ttk.Frame(self)
         bar.pack(pady=(0, 14))
         ttk.Button(bar, text="Gộp thêm", command=lambda: chon("gop")).pack(side="left", padx=4)
-        ttk.Button(bar, text="Thay hẳn", command=lambda: chon("thay")).pack(side="left", padx=4)
+        ttk.Button(bar, text="Thay hẳn", command=lambda: chon("thay"),
+                   style="NguyHiem.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         parent.wait_window(self)
@@ -3283,7 +3368,7 @@ class DanNhieuDong(tk.Toplevel):
 
         bar = ttk.Frame(self)
         bar.pack(pady=12)
-        ttk.Button(bar, text="Thêm vào danh sách", command=ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="Thêm vào danh sách", command=ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         parent.wait_window(self)
@@ -3316,7 +3401,7 @@ class ChonMotMuc(tk.Toplevel):
 
         bar = ttk.Frame(self)
         bar.pack(pady=12)
-        ttk.Button(bar, text="OK", command=ok).pack(side="left", padx=4)
+        ttk.Button(bar, text="OK", command=ok, style="Nhan.TButton").pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
         ds.bind("<Double-Button-1>", lambda _e: ok())
 
