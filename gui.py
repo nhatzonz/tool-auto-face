@@ -45,6 +45,14 @@ import post_phong_tro_fb as bot
 import tao_file_mau
 
 
+# Đuôi file nút "🗑 Xóa toàn bộ ảnh" dọn sạch: ảnh tool đăng được, cộng .mp4.
+# Để riêng .mp4 ra biến khác vì còn dùng để đếm và ghi rõ trong câu hỏi xác
+# nhận — xóa vĩnh viễn thì người bấm phải thấy trước mình sắp mất những gì.
+DUOI_ANH = (".jpg", ".jpeg", ".png", ".webp")
+DUOI_VIDEO = (".mp4",)
+DUOI_XOA_HANG_LOAT = DUOI_ANH + DUOI_VIDEO
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -702,8 +710,11 @@ class App(tk.Tk):
         bar = ttk.Frame(f)
         bar.pack(fill="x", pady=6)
         ttk.Button(bar, text="+ Thêm bài", command=self.add_row).pack(side="left")
-        ttk.Button(bar, text="Sửa bài", command=self.edit_row).pack(side="left", padx=4)
+        # Nút "Sửa bài" tạm ẩn theo yêu cầu — bấm đúp vào dòng vẫn mở được hộp
+        # thoại sửa như cũ (xem binding <Double-1> ở cuối hàm này).
+        # ttk.Button(bar, text="Sửa bài", command=self.edit_row).pack(side="left", padx=4)
         ttk.Button(bar, text="Xóa bài", command=self.delete_row).pack(side="left")
+        ttk.Button(bar, text="🗑 Xóa toàn bộ ảnh", command=self.xoa_toan_bo_anh).pack(side="left", padx=4)
         ttk.Button(bar, text="🖼 Ảnh của bài này", command=self.quan_ly_anh).pack(side="left", padx=12)
         ttk.Button(bar, text="⟳ Tải lại từ Excel", command=self.load_excel).pack(side="left", padx=12)
         ttk.Button(bar, text="💾 Ghi vào file Excel", command=self.save_excel).pack(side="left")
@@ -867,6 +878,91 @@ class App(tk.Tk):
         self.excel_rows.pop(idx)
         self.refresh_data_tree()
         self.excel_status.config(text="Đã xóa — nhớ bấm 💾 Ghi vào file Excel.")
+
+    def xoa_toan_bo_anh(self):
+        """Dọn sạch thư mục ảnh của bài đang chọn: cả ảnh lẫn video .mp4.
+
+        Khác nút 'Xóa tất cả ảnh' trong cửa sổ quản lý ảnh ở chỗ nó xóa luôn
+        .mp4. Thư mục ảnh hay lẫn clip quay phòng gửi qua Zalo — tool không
+        đăng được video nên chúng chỉ nằm đó chiếm chỗ; xóa ảnh mà bỏ sót video
+        thì lần sau mở ra vẫn thấy thư mục đầy, tưởng xóa hụt.
+
+        Không đụng tới chính thư mục: xóa mất thì cột 'Thư mục ảnh' trong Excel
+        trỏ vào chỗ trống.
+        """
+        idx = self.selected_row_index()
+        if idx is None:
+            messagebox.showwarning("Chưa chọn", "Hãy chọn một bài trong bảng.")
+            return
+
+        row = self.excel_rows[idx]
+        ten_thu_muc = (row.get("folder") or "").strip()
+        if not ten_thu_muc:
+            messagebox.showinfo(
+                "Bài này chưa có thư mục ảnh",
+                "Cột 'Thư mục ảnh' của bài đang trống nên không có gì để xóa.")
+            return
+
+        duong_dan = os.path.join(self.campaign().get("images_dir") or "", ten_thu_muc)
+        if not os.path.isdir(duong_dan):
+            messagebox.showinfo(
+                "Chưa có thư mục",
+                f"Bài này chưa có thư mục ảnh trên ổ đĩa:\n{duong_dan}")
+            return
+
+        try:
+            ten_file = sorted(os.listdir(duong_dan))
+        except OSError as e:
+            messagebox.showerror("Không đọc được", f"Không đọc được thư mục:\n{e}")
+            return
+
+        can_xoa = [
+            t for t in ten_file
+            if t.lower().endswith(DUOI_XOA_HANG_LOAT)
+            and os.path.isfile(os.path.join(duong_dan, t))
+        ]
+        if not can_xoa:
+            messagebox.showinfo(
+                "Không có gì để xóa",
+                f"Thư mục '{ten_thu_muc}' không có ảnh hay video .mp4 nào.")
+            return
+
+        so_video = sum(1 for t in can_xoa if t.lower().endswith(DUOI_VIDEO))
+        so_anh = len(can_xoa) - so_video
+        phan = []
+        if so_anh:
+            phan.append(f"{so_anh} ảnh")
+        if so_video:
+            phan.append(f"{so_video} video mp4")
+        mo_ta = " và ".join(phan)
+
+        if not messagebox.askyesno(
+            "Xóa toàn bộ ảnh",
+            f"Xóa hẳn {mo_ta} của bài STT {row['stt']}?\n\n"
+            f"Thư mục: {duong_dan}\n\n"
+            "Không vào Thùng rác, không hoàn tác được.\n"
+            "Thư mục vẫn giữ nguyên để bạn bỏ ảnh mới vào."):
+            return
+
+        da_xoa, loi = 0, []
+        for t in can_xoa:
+            try:
+                os.remove(os.path.join(duong_dan, t))
+                da_xoa += 1
+            except OSError as e:
+                loi.append(f"{t}: {e}")
+
+        self.append_log(f"🗑 Đã xóa {da_xoa} file ảnh/video trong {duong_dan}")
+        if loi:
+            messagebox.showerror(
+                "Có file không xóa được",
+                f"Đã xóa {da_xoa}/{len(can_xoa)} file. Không xóa được:\n\n"
+                + "\n".join(loi[:8]))
+            self.excel_status.config(
+                text=f"Xóa được {da_xoa}/{len(can_xoa)} file của bài STT {row['stt']}.")
+        else:
+            self.excel_status.config(
+                text=f"Đã xóa {mo_ta} của bài STT {row['stt']} — file Excel không đổi.")
 
     def save_excel(self):
         """Ghi bảng xuống file Excel gốc. Sao lưu bản cũ thành .bak trước khi ghi."""
@@ -1096,6 +1192,11 @@ class App(tk.Tk):
         ttk.Button(left, text="Đổi tên", command=self.rename_category).pack(fill="x", padx=6, pady=2)
         ttk.Button(left, text="Xóa phân loại", command=self.delete_category).pack(fill="x", padx=6, pady=(2, 8))
 
+        ttk.Separator(left).pack(fill="x", padx=6, pady=(0, 6))
+        ttk.Label(left, text="Chuyển sang máy khác", foreground="#777").pack(anchor="w", padx=6)
+        ttk.Button(left, text="⬆ Xuất ra file", command=self.xuat_nhom).pack(fill="x", padx=6, pady=2)
+        ttk.Button(left, text="⬇ Nhập từ file", command=self.nhap_nhom).pack(fill="x", padx=6, pady=(2, 8))
+
         right = ttk.LabelFrame(f, text="Link group (mỗi dòng 1 link)")
         right.pack(side="left", fill="both", expand=True, pady=4)
 
@@ -1183,6 +1284,160 @@ class App(tk.Tk):
         self.campaign()["groups"][self.current_cat] = urls
         cfg_module.save_config(self.cfg)
         messagebox.showinfo("Đã lưu", f"Phân loại '{self.current_cat}': {len(urls)} group.")
+
+    # ---------- xuất / nhập danh sách nhóm ----------
+    #
+    # Chỉ gói đúng phần nhóm theo phân loại. Cố ý KHÔNG mang theo đường dẫn
+    # (excel_path, images_dir, profiles_dir... là đường dẫn tuyệt đối, sang máy
+    # khác là sai hết), nick (profile Chrome nặng vài GB, chuyển máy còn dễ dính
+    # checkpoint), và lịch hẹn giờ (mỗi lịch trỏ tới nick theo tên, máy mới chưa
+    # có nick đó thì tới giờ chạy sẽ lỗi). Giữ file nhỏ và vô hại như vậy thì
+    # nhập vào máy nào cũng được, không phá cấu hình sẵn có của máy đó.
+
+    LOAI_FILE_NHOM = "nhom_theo_phan_loai"
+
+    def xuat_nhom(self):
+        """Ghi danh sách nhóm của chiến dịch đang chọn ra file .json."""
+        groups = self.campaign()["groups"]
+        if not groups:
+            messagebox.showinfo(
+                "Chưa có gì để xuất",
+                f"Chiến dịch '{self.cfg['active_campaign']}' chưa có phân loại nào.")
+            return
+
+        ten_goi_y = (f"nhom_{bot.sanitize_account_name(self.cfg['active_campaign'])}_"
+                     f"{datetime.now():%Y%m%d}.json")
+        duong_dan = filedialog.asksaveasfilename(
+            parent=self, title="Lưu danh sách nhóm ra file",
+            initialfile=ten_goi_y, defaultextension=".json",
+            filetypes=[("File JSON", "*.json")])
+        if not duong_dan:
+            return
+
+        goi = {
+            "loai_file": self.LOAI_FILE_NHOM,
+            "phien_ban": 1,
+            "chien_dich_goc": self.cfg["active_campaign"],
+            "xuat_luc": datetime.now().isoformat(timespec="seconds"),
+            "groups": {ten: list(link) for ten, link in groups.items()},
+        }
+        try:
+            with open(duong_dan, "w", encoding="utf-8") as fh:
+                json.dump(goi, fh, ensure_ascii=False, indent=2)
+        except OSError as e:
+            messagebox.showerror("Không ghi được", f"Không ghi được file:\n{e}")
+            return
+
+        tong_link = sum(len(v) for v in groups.values())
+        self.append_log(f"⬆ Đã xuất {len(groups)} phân loại / {tong_link} group ra {duong_dan}")
+        messagebox.showinfo(
+            "Đã xuất",
+            f"Đã ghi {len(groups)} phân loại / {tong_link} group vào:\n{duong_dan}\n\n"
+            "Chép file này sang máy mới rồi bấm '⬇ Nhập từ file'.")
+
+    def nhap_nhom(self):
+        """Đọc file đã xuất, gộp thêm hoặc thay hẳn nhóm của chiến dịch đang chọn."""
+        if self.dang_chay():
+            return
+
+        duong_dan = filedialog.askopenfilename(
+            parent=self, title="Chọn file danh sách nhóm đã xuất",
+            filetypes=[("File JSON", "*.json"), ("Tất cả", "*.*")])
+        if not duong_dan:
+            return
+
+        try:
+            with open(duong_dan, encoding="utf-8") as fh:
+                goi = json.load(fh)
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Không đọc được", f"File không đọc được:\n{e}")
+            return
+
+        # Nhận nhầm file config.json của tool thì sẽ nhập ra thứ hoàn toàn khác,
+        # nên chặn ngay bằng dấu nhận dạng ghi lúc xuất.
+        if not isinstance(goi, dict) or goi.get("loai_file") != self.LOAI_FILE_NHOM:
+            messagebox.showerror(
+                "Sai loại file",
+                "File này không phải file nhóm do tool xuất ra.\n\n"
+                "Hãy chọn file tạo bằng nút '⬆ Xuất ra file'.")
+            return
+
+        moi = self._doc_nhom_tu_goi(goi.get("groups"))
+        if moi is None:
+            messagebox.showerror(
+                "File hỏng", "Phần danh sách nhóm trong file không đúng định dạng.")
+            return
+        if not moi:
+            messagebox.showinfo("File trống", "File này không có phân loại nào.")
+            return
+
+        tong_link = sum(len(v) for v in moi.values())
+        cach = ChonCachNhap(
+            self,
+            f"File có {len(moi)} phân loại / {tong_link} group"
+            + (f"\n(xuất từ chiến dịch '{goi['chien_dich_goc']}')"
+               if goi.get("chien_dich_goc") else "")
+            + f"\n\nNhập vào chiến dịch đang chọn: '{self.cfg['active_campaign']}'",
+        ).result
+        if not cach:
+            return
+
+        groups = self.campaign()["groups"]
+        if cach == "thay":
+            cu_sl = len(groups)
+            self.campaign()["groups"] = moi
+            tom_tat = (f"Đã thay hẳn: bỏ {cu_sl} phân loại cũ, "
+                       f"dùng {len(moi)} phân loại / {tong_link} group từ file.")
+        else:
+            them_pl = them_link = trung = 0
+            for ten, link_moi in moi.items():
+                if ten not in groups:
+                    groups[ten] = []
+                    them_pl += 1
+                dang_co = groups[ten]
+                da_co = set(dang_co)
+                for link in link_moi:
+                    if link in da_co:
+                        trung += 1
+                        continue
+                    dang_co.append(link)
+                    da_co.add(link)
+                    them_link += 1
+            tom_tat = (f"Đã gộp: thêm {them_pl} phân loại mới, {them_link} group mới, "
+                       f"bỏ qua {trung} group đã có.")
+
+        cfg_module.save_config(self.cfg)
+        self.current_cat = None
+        self.url_box.delete("1.0", "end")
+        self.refresh_categories()
+        self.append_log(f"⬇ Nhập nhóm từ {duong_dan} — {tom_tat}")
+        messagebox.showinfo("Đã nhập", tom_tat)
+
+    @staticmethod
+    def _doc_nhom_tu_goi(du_lieu):
+        """Làm sạch phần 'groups' của file nhập: bỏ link rỗng và link trùng.
+
+        Trả về None nếu cấu trúc sai (để báo file hỏng thay vì nhập ra dữ liệu
+        méo mó). File có thể do người dùng mở ra sửa tay nên không tin sẵn.
+        """
+        if not isinstance(du_lieu, dict):
+            return None
+        sach = {}
+        for ten, link in du_lieu.items():
+            if not isinstance(ten, str) or not isinstance(link, list):
+                return None
+            da_co, giu = set(), []
+            for mot in link:
+                if not isinstance(mot, str):
+                    return None
+                mot = mot.strip()
+                if mot and mot not in da_co:
+                    da_co.add(mot)
+                    giu.append(mot)
+            ten = ten.strip()
+            if ten:
+                sach[ten] = giu
+        return sach
 
     # ==================== TAB: HẸN GIỜ ĐĂNG ====================
 
@@ -2298,8 +2553,6 @@ class QuanLyAnh(tk.Toplevel):
     xóa mất là cột 'Thư mục ảnh' trong Excel trỏ vào chỗ trống.
     """
 
-    DUOI_ANH = (".jpg", ".jpeg", ".png", ".webp")
-
     def __init__(self, parent, thu_muc, nhan):
         super().__init__(parent)
         self.thu_muc = thu_muc
@@ -2355,7 +2608,7 @@ class QuanLyAnh(tk.Toplevel):
         for t in ten:
             if not os.path.isfile(os.path.join(self.thu_muc, t)):
                 continue
-            (anh if t.lower().endswith(self.DUOI_ANH) else khac).append(t)
+            (anh if t.lower().endswith(DUOI_ANH) else khac).append(t)
         return anh, khac
 
     @staticmethod
@@ -2828,9 +3081,19 @@ class RowEditor(tk.Toplevel):
 
         ttk.Label(self, text="Nội dung bài đăng (gõ xuống dòng thoải mái, "
                              "Facebook sẽ giữ nguyên):").pack(anchor="w", padx=14, pady=(14, 4))
-        self.text = tk.Text(self, wrap="word", height=14, font=("Menlo", 12))
+
+        thanh_text = ttk.Frame(self)
+        thanh_text.pack(fill="x", padx=14, pady=(0, 4))
+        ttk.Button(thanh_text, text=". Chấm câu cuối dòng",
+                   command=self.cham_cau).pack(side="left")
+        self.bao_cham_cau = ttk.Label(thanh_text, text="", foreground="#777")
+        self.bao_cham_cau.pack(side="left", padx=10)
+
+        # undo=True để bấm nhầm nút chấm câu còn Ctrl/Cmd+Z lấy lại được
+        self.text = tk.Text(self, wrap="word", height=14, font=("Menlo", 12), undo=True)
         self.text.pack(fill="both", expand=True, padx=14)
         self.text.insert("1.0", row["noi_dung"])
+        self.text.edit_reset()      # nội dung nạp sẵn không tính là một bước undo
 
         grid = ttk.Frame(self)
         grid.pack(fill="x", padx=14, pady=10)
@@ -2862,6 +3125,48 @@ class RowEditor(tk.Toplevel):
 
         self.text.focus_set()
         parent.wait_window(self)
+
+    # Dấu câu coi như "dòng đã kết thúc rồi", không chấm thêm. Có cả dấu phẩy
+    # và hai chấm vì dòng kết thúc bằng chúng là đang bỏ lửng sang dòng sau
+    # (vd "Dịch vụ : Gía trên chưa bao gồm:") — chấm vào là sai ý.
+    KET_THUC_SAN = (".", "!", "?", "…", ":", ";", ",", "·")
+
+    def cham_cau(self):
+        """Thêm dấu chấm vào cuối mọi dòng còn thiếu.
+
+        Bài đăng gõ vội hay sót dấu chấm ở vài dòng, nhìn rời rạc. Làm tay thì
+        phải click vào từng cuối dòng. Nút này quét một lượt, nhưng bỏ qua:
+        dòng trống, dòng đã có dấu câu cuối, và dòng không có chữ/số nào (hàng
+        emoji hay gạch ngang phân cách — chấm vào chỉ thành rác).
+        """
+        goc = self.text.get("1.0", "end").rstrip("\n")
+        dong_moi, da_sua = [], 0
+        for dong in goc.split("\n"):
+            cat = dong.rstrip()
+            if (not cat
+                    or cat.endswith(self.KET_THUC_SAN)
+                    or not any(ky_tu.isalnum() for ky_tu in cat)):
+                dong_moi.append(dong)
+                continue
+            dong_moi.append(cat + ".")
+            da_sua += 1
+
+        if not da_sua:
+            self.bao_cham_cau.config(text="Mọi dòng đã có dấu câu cuối rồi.")
+            return
+
+        # Gom thành một bước undo duy nhất: bấm Ctrl/Cmd+Z một lần là về như cũ
+        self.text.edit_separator()
+        vi_tri = self.text.index("insert")
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", "\n".join(dong_moi))
+        self.text.edit_separator()
+        try:
+            self.text.mark_set("insert", vi_tri)
+        except tk.TclError:
+            pass
+        self.bao_cham_cau.config(
+            text=f"Đã chấm {da_sua} dòng — bấm Ctrl/Cmd+Z nếu muốn bỏ.")
 
     def ok(self):
         noi_dung = self.text.get("1.0", "end").rstrip("\n")
@@ -2916,6 +3221,43 @@ class SimplePrompt(tk.Toplevel):
         ttk.Button(bar, text="OK", command=ok).pack(side="left", padx=4)
         ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
         entry.bind("<Return>", lambda _e: ok())
+
+        parent.wait_window(self)
+
+
+class ChonCachNhap(tk.Toplevel):
+    """Hỏi nhập nhóm kiểu gộp hay thay hẳn. Trả về "gop", "thay" hoặc None.
+
+    Không dùng messagebox.askyesnocancel vì nút của nó là Yes/No/Cancel — người
+    dùng phải đoán Yes là gộp hay là thay, mà đoán sai thì mất sạch nhóm đang có.
+    """
+
+    def __init__(self, parent, mo_ta):
+        super().__init__(parent)
+        self.title("Nhập danh sách nhóm")
+        self.result = None
+        self.transient(parent)
+        self.grab_set()
+
+        ttk.Label(self, text=mo_ta, justify="left").pack(
+            padx=16, pady=(16, 10), anchor="w")
+        ttk.Separator(self).pack(fill="x", padx=16)
+        ttk.Label(
+            self,
+            text="Gộp thêm   — giữ nguyên nhóm đang có, chỉ thêm nhóm mới, bỏ link trùng.\n"
+                 "Thay hẳn   — xóa sạch phân loại hiện tại rồi dùng y hệt file.",
+            foreground="#555", justify="left",
+        ).pack(padx=16, pady=10, anchor="w")
+
+        def chon(gia_tri):
+            self.result = gia_tri
+            self.destroy()
+
+        bar = ttk.Frame(self)
+        bar.pack(pady=(0, 14))
+        ttk.Button(bar, text="Gộp thêm", command=lambda: chon("gop")).pack(side="left", padx=4)
+        ttk.Button(bar, text="Thay hẳn", command=lambda: chon("thay")).pack(side="left", padx=4)
+        ttk.Button(bar, text="Hủy", command=self.destroy).pack(side="left", padx=4)
 
         parent.wait_window(self)
 
