@@ -27,6 +27,7 @@ import sys
 import calendar
 import webbrowser
 import threading
+import traceback
 import tkinter as tk
 from datetime import date, datetime
 from tkinter import ttk, filedialog, messagebox
@@ -292,10 +293,44 @@ class App(tk.Tk):
         tác trên tool, chứ bắt đóng hướng dẫn mới bấm được nút thì đọc xong lại
         quên mất đang ở bước nào."""
         if getattr(self, "_cua_so_hd", None) and self._cua_so_hd.winfo_exists():
+            self._cua_so_hd.deiconify()      # đang thu nhỏ thì mở lại
             self._cua_so_hd.lift()
-            self._cua_so_hd.focus_set()
+            self._cua_so_hd.focus_force()
             return
-        self._cua_so_hd = huong_dan.CuaSoHuongDan(self)
+
+        # Bản .exe/.app không có cửa sổ dòng lệnh nên stderr bị nuốt (xem
+        # paths.guard_missing_stdout): lỗi ở đây sẽ không hiện ra ở đâu cả,
+        # người dùng chỉ thấy bấm nút mà không có gì xảy ra. Bắt lại và nói ra.
+        try:
+            self._cua_so_hd = huong_dan.CuaSoHuongDan(self)
+        except Exception as e:
+            chi_tiet = traceback.format_exc()
+            self.append_log(f"✗ Không mở được cửa sổ hướng dẫn: {e}")
+            for dong in chi_tiet.strip().splitlines():
+                self.append_log(f"    {dong}")
+            if messagebox.askyesno(
+                "Không mở được hướng dẫn",
+                f"{e}\n\n(Chi tiết đã ghi vào ô log ở tab Tài khoản & Chạy)\n\n"
+                "Mở file hướng dẫn bằng ứng dụng mặc định của máy thay thế?"):
+                self._mo_file_huong_dan_ngoai()
+
+    def _mo_file_huong_dan_ngoai(self):
+        """Phương án dự phòng: nhờ hệ điều hành mở file .md."""
+        dd = huong_dan.duong_dan_file()
+        if not dd:
+            messagebox.showerror(
+                "Không tìm thấy file",
+                f"Không thấy {huong_dan.TEN_FILE} đi kèm trong gói cài đặt.")
+            return
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", dd], check=False)
+            elif os.name == "nt":
+                os.startfile(dd)
+            else:
+                subprocess.run(["xdg-open", dd], check=False)
+        except Exception as e:
+            messagebox.showerror("Không mở được", str(e))
 
     def rename_campaign(self):
         if self.dang_chay():

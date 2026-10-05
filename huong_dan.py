@@ -152,8 +152,12 @@ class CuaSoHuongDan(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Hướng dẫn sử dụng")
-        self.transient(parent)
         giao_dien.dat_kich_thuoc(self, 1000, 700, 720, 480)
+        # Cố ý KHÔNG transient(parent): cửa sổ transient trên một số bản Tk của
+        # macOS bị dán cứng vào cửa sổ cha, nằm đè lên và không nhận được click.
+        # Đây là tài liệu để đọc song song khi thao tác, nên để nó là cửa sổ độc
+        # lập, có mục riêng trên Dock, chuyển qua lại bằng Cmd+` được.
+        self._tach_khoi_cua_so_cha(parent)
 
         dd = duong_dan_file()
         if not dd:
@@ -163,11 +167,15 @@ class CuaSoHuongDan(tk.Toplevel):
         with open(dd, encoding="utf-8") as fh:
             self.muc = doc_cac_muc(fh.read())
 
-        khung = ttk.PanedWindow(self, orient="horizontal")
+        # Dùng frame thường chứ không PanedWindow: trên Tk 8.6 (bản đi kèm máy
+        # build) thanh chia đôi có lúc không được đặt vị trí, cột trái co về 0
+        # và biến mất — nhìn như cửa sổ hỏng, không bấm vào mục nào được.
+        khung = ttk.Frame(self)
         khung.pack(fill="both", expand=True, padx=10, pady=10)
 
-        trai = ttk.Frame(khung)
-        khung.add(trai, weight=0)
+        trai = ttk.Frame(khung, width=300)
+        trai.pack(side="left", fill="y", padx=(0, 12))
+        trai.pack_propagate(False)      # giữ đúng 300px, không co theo nội dung
         ttk.Label(trai, text="Nội dung", style="TieuDe.TLabel").pack(anchor="w", pady=(0, 6))
         self.o_tim = tk.StringVar()
         o = ttk.Entry(trai, textvariable=self.o_tim, width=30)
@@ -181,7 +189,7 @@ class CuaSoHuongDan(tk.Toplevel):
         self.ds.bind("<<ListboxSelect>>", lambda _e: self._hien())
 
         phai = ttk.Frame(khung)
-        khung.add(phai, weight=1)
+        phai.pack(side="left", fill="both", expand=True)
 
         # Thanh vị trí: đang đọc mục nào, phần mấy — cuộn giữa trang vẫn biết
         self.duong_dan_doc = ttk.Label(phai, text="", style="Phu.TLabel")
@@ -218,6 +226,32 @@ class CuaSoHuongDan(tk.Toplevel):
         if self.ds.size():
             self.ds.selection_set(0)
             self._hien()
+        self.after(50, self._len_truoc)
+
+    def _tach_khoi_cua_so_cha(self, cha):
+        """Dời cửa sổ lệch khỏi cửa sổ chính để thấy rõ là hai cửa sổ riêng.
+
+        Cả hai đều mở ở giữa màn hình nên chồng khít lên nhau, nhìn tưởng một
+        cửa sổ bị kẹt — bấm vào phần thò ra lại hoá ra đang bấm vào cửa sổ dưới.
+        """
+        try:
+            cha.update_idletasks()
+            x = cha.winfo_rootx() + 60
+            y = cha.winfo_rooty() + 40
+            rong, cao = self.winfo_width(), self.winfo_height()
+            x = max(0, min(x, self.winfo_screenwidth() - rong))
+            y = max(0, min(y, self.winfo_screenheight() - cao))
+            self.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+
+    def _len_truoc(self):
+        """Đưa cửa sổ lên trên và nhận bàn phím/chuột."""
+        try:
+            self.lift()
+            self.focus_force()
+        except tk.TclError:
+            pass
 
     def _nhay(self, buoc):
         """Sang mục kế tiếp/trước đó trong cột trái."""
@@ -231,11 +265,23 @@ class CuaSoHuongDan(tk.Toplevel):
         self._hien()
 
     def _khi_doi_co(self, su_kien):
+        """Vẽ lại khi ô chữ đổi bề ngang, để bảng và ảnh co giãn theo.
+
+        Cờ _dang_ve là bắt buộc: vẽ lại làm đổi bố cục, đổi bố cục lại sinh
+        <Configure> mới. Thiếu cờ thì hai việc đó gọi nhau vòng tròn và giao
+        diện đứng hình — không báo lỗi gì, chỉ là bấm vào đâu cũng không ăn.
+        """
+        if getattr(self, "_dang_ve", False):
+            return
         if abs(su_kien.width - self._rong_cu) < 40:
             return
         self._rong_cu = su_kien.width
         self._dang_xem = None          # ép vẽ lại ở lần _hien() tới
-        self._hien()
+        self._dang_ve = True
+        try:
+            self._hien()
+        finally:
+            self._dang_ve = False
 
     # ---------- hiển thị ----------
 
