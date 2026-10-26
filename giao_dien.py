@@ -200,6 +200,16 @@ def dat_kich_thuoc(cua_so, rong_muon, cao_muon, rong_toi_thieu, cao_toi_thieu):
     cua_so.update_idletasks()
     rong_man, cao_man = cua_so.winfo_screenwidth(), cua_so.winfo_screenheight()
 
+    # Các con số cỡ cửa sổ đo trên màn 100%. Windows phóng to 125–150% mà tool
+    # chạy ở chế độ nét (DPI-aware) thì chữ to theo nhưng cửa sổ vẫn đứng yên
+    # cỡ pixel cũ → nút cuối bị đẩy ra ngoài. Nhân theo tỉ lệ thật của màn.
+    # Mac tự lo chuyện Retina nên không đụng vào.
+    if platform.system() == "Windows":
+        he_so = max(1.0, cua_so.winfo_fpixels("1i") / 96)
+        rong_muon, cao_muon = int(rong_muon * he_so), int(cao_muon * he_so)
+        rong_toi_thieu = int(rong_toi_thieu * he_so)
+        cao_toi_thieu = int(cao_toi_thieu * he_so)
+
     # Chừa chỗ cho thanh taskbar/dock, nên lấy 92% màn hình làm trần
     rong = max(320, min(rong_muon, int(rong_man * 0.92)))
     cao = max(320, min(cao_muon, int(cao_man * 0.92)))

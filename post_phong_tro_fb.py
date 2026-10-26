@@ -95,9 +95,16 @@ def load_posted_log():
 
 
 def save_posted_log(posted):
-    """Ghi lại danh sách bài đã đăng."""
-    with open(POSTED_LOG, "w", encoding="utf-8") as f:
+    """Ghi lại danh sách bài đã đăng.
+
+    Ghi ra file tạm rồi đổi tên: file này được ghi sau MỖI lượt đăng, tắt máy
+    hay tắt tool đúng lúc đang ghi mà để lại file JSON cụt thì mọi lần chạy
+    sau đều chết ngay ở bước đọc log.
+    """
+    tmp = POSTED_LOG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(posted, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, POSTED_LOG)
 
 
 def _ngay_da_dang(gia_tri):

@@ -51,6 +51,14 @@ import tao_file_mau
 # Đuôi file nút "🗑 Xóa toàn bộ ảnh" dọn sạch: ảnh tool đăng được, cộng .mp4.
 # Để riêng .mp4 ra biến khác vì còn dùng để đếm và ghi rõ trong câu hỏi xác
 # nhận — xóa vĩnh viễn thì người bấm phải thấy trước mình sắp mất những gì.
+# Chiều cao "xin" cho mọi ô danh sách/bảng/log có expand=True trong cửa sổ
+# đặt cỡ cố định. pack() chia chỗ theo thứ tự gọi: ô to pack trước xin bao
+# nhiêu thì lấy bấy nhiêu, thiếu chỗ thì widget pack SAU bị bóp về 0 — chính
+# là mấy nút Lưu/Xuất/Nhập nằm dưới. Trên Windows phóng chữ 125–150% hay màn
+# 768px là thiếu chỗ ngay. Xin ít thôi, phần còn thừa expand tự chia cho ô.
+CAO_CO_GIAN = 3
+
+
 def _soc(chi_so):
     """Tên tag tô nền xen kẽ cho dòng bảng — mắt dò theo hàng ngang đỡ lạc."""
     return "soc" if chi_so % 2 else "thuong"
@@ -135,7 +143,8 @@ class App(tk.Tk):
         self.refresh_join_nicks()
         self.after(100, self._drain_log_queue)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.after(50, self._hich_ve_lai)
+        if sys.platform == "darwin":
+            self.after(50, self._hich_ve_lai)
 
         # Windows tự mở tool lúc khởi động máy thì thu nhỏ ngay, đừng nhảy ra
         # chắn màn hình người dùng khi họ vừa đăng nhập.
@@ -222,7 +231,7 @@ class App(tk.Tk):
 
     def on_switch_campaign(self, _event=None):
         """Đổi chiến dịch đang chọn rồi nạp lại toàn bộ ô nhập."""
-        if self.dang_chay():
+        if self.dang_chay() or not self.bo_qua_thay_doi_chua_luu("Chuyển chiến dịch"):
             self.campaign_var.set(self.cfg["active_campaign"])   # trả về như cũ
             return
         self.cfg["active_campaign"] = self.campaign_var.get()
@@ -254,6 +263,8 @@ class App(tk.Tk):
             return
         if name in self.cfg["campaigns"]:
             messagebox.showinfo("Đã có", f"Chiến dịch '{name}' đã tồn tại.")
+            return
+        if not self.bo_qua_thay_doi_chua_luu("Chuyển sang chiến dịch mới"):
             return
         dang_dung = [c["posted_log"] for c in self.cfg["campaigns"].values()]
         self.cfg["campaigns"][name] = cfg_module.new_campaign(name, dang_dung)
@@ -395,7 +406,7 @@ class App(tk.Tk):
         left = ttk.LabelFrame(f, text="Nick Facebook (dùng chung mọi chiến dịch)")
         left.pack(side="left", fill="y", padx=(0, 8), pady=4)
 
-        self.acc_list = tk.Listbox(left, width=26, exportselection=False)
+        self.acc_list = tk.Listbox(left, width=26, height=CAO_CO_GIAN, exportselection=False)
         self.acc_list.pack(fill="y", expand=True, padx=6, pady=6)
 
         ttk.Button(left, text="+ Thêm nick mới", command=self.add_account).pack(fill="x", padx=6, pady=2)
@@ -426,7 +437,7 @@ class App(tk.Tk):
         self.status = ttk.Label(right, text="Sẵn sàng.")
         self.status.pack(anchor="w", pady=(0, 4))
 
-        self.log_box = tk.Text(right, wrap="word", height=25, font="TkFixedFont")
+        self.log_box = tk.Text(right, wrap="word", height=CAO_CO_GIAN, font="TkFixedFont")
         _mau_log(self.log_box)
         scroll = ttk.Scrollbar(right, command=self.log_box.yview)
         self.log_box.configure(yscrollcommand=scroll.set)
@@ -527,6 +538,11 @@ class App(tk.Tk):
         self.worker.start()
 
     def delete_account(self):
+        # Lúc cửa sổ đăng nhập đang mở, giao diện không khoá mà Chrome vẫn đang
+        # giữ profile — xóa lúc đó trên Windows chỉ xóa được một nửa, profile
+        # hỏng luôn.
+        if self.dang_chay():
+            return
         acc = self.selected_account()
         if not acc:
             messagebox.showwarning("Chưa chọn", "Hãy chọn một nick trong danh sách.")
@@ -829,7 +845,7 @@ class App(tk.Tk):
         self.excel_status.pack(anchor="w", padx=2, pady=(0, 4))
 
         cols = ("stt", "noi_dung", "phan_loai", "folder")
-        self.data_tree = ttk.Treeview(f, columns=cols, show="headings", height=18)
+        self.data_tree = ttk.Treeview(f, columns=cols, show="headings", height=CAO_CO_GIAN)
         _ke_soc(self.data_tree)
         # stretch=True chỉ cho cột nội dung: kéo rộng cửa sổ thì phần thừa dồn
         # hết vào đó. Để mặc định (mọi cột cùng nở) thì cột STT rộng ra vô ích
@@ -955,7 +971,8 @@ class App(tk.Tk):
 
     def add_row(self):
         cats = list(self.campaign()["groups"])
-        row = RowEditor(self, "Thêm bài đăng", None, cats, self.next_stt()).result
+        row = RowEditor(self, "Thêm bài đăng", None, cats, self.next_stt(),
+                        stt_khac=[r["stt"] for r in self.excel_rows]).result
         if row:
             self.excel_rows.append(row)
             self.refresh_data_tree()
@@ -967,7 +984,9 @@ class App(tk.Tk):
             messagebox.showwarning("Chưa chọn", "Hãy chọn một bài trong bảng.")
             return
         cats = list(self.campaign()["groups"])
-        row = RowEditor(self, "Sửa bài đăng", self.excel_rows[idx], cats).result
+        row = RowEditor(self, "Sửa bài đăng", self.excel_rows[idx], cats,
+                        stt_khac=[r["stt"] for i, r in enumerate(self.excel_rows)
+                                  if i != idx]).result
         if row:
             self.excel_rows[idx] = row
             self.refresh_data_tree()
@@ -1236,6 +1255,26 @@ class App(tk.Tk):
                     "Hãy chọn một file khác, ví dụ thêm đuôi tên chiến dịch.")
                 return
 
+        # Đọc hết số trước rồi mới ghi gì vào camp: báo lỗi giữa chừng mà camp
+        # đã bị sửa một nửa thì lần lưu bất kỳ sau đó (lưu nhóm, lưu lịch...)
+        # sẽ ghi luôn nửa cấu hình dở dang đó xuống file.
+        so = {}
+        for key, var in self.num_vars.items():
+            try:
+                so[key] = int(var.get().strip())
+            except ValueError:
+                messagebox.showerror("Sai định dạng", f"'{var.get()}' không phải số nguyên.")
+                return
+
+        doi_excel = (self.path_vars["excel_path"].get().strip() != camp["excel_path"]
+                     or self.path_vars["sheet_name"].get().strip() != camp["sheet_name"])
+        if doi_excel and self.co_thay_doi_chua_luu() and not messagebox.askyesno(
+            "Chưa ghi vào Excel",
+            "Bạn vừa đổi file Excel/sheet trong khi bảng 'Nội dung bài đăng' còn "
+            "sửa chưa ghi. Lưu cấu hình sẽ nạp file mới và bỏ mất phần sửa đó.\n\n"
+            "Vẫn lưu?"):
+            return
+
         for key, var in self.path_vars.items():
             camp[key] = var.get().strip()
         # Delay quá thấp là con đường nhanh nhất để bị Facebook khoá nick, nên
@@ -1246,11 +1285,7 @@ class App(tk.Tk):
         # dialog không đóng kịp), retry cao sẽ rải nhiều bài trùng lên cùng group.
         TRAN = {"max_retries": 3}
         for key, var in self.num_vars.items():
-            try:
-                gia_tri = int(var.get().strip())
-            except ValueError:
-                messagebox.showerror("Sai định dạng", f"'{var.get()}' không phải số nguyên.")
-                return
+            gia_tri = so[key]
             if gia_tri < SAN[key]:
                 messagebox.showwarning(
                     "Giá trị quá thấp",
@@ -1280,9 +1315,11 @@ class App(tk.Tk):
         self.cfg["profiles_dir"] = self.profiles_var.get().strip()
         cfg_module.save_config(self.cfg)
         self.refresh_accounts()
-        # Đường dẫn Excel có thể vừa đổi — phải nạp lại bảng, nếu không lần
-        # bấm Ghi sau sẽ đổ nội dung file cũ đè lên file mới.
-        self.load_excel()
+        # Đường dẫn Excel vừa đổi — phải nạp lại bảng, nếu không lần bấm Ghi
+        # sau sẽ đổ nội dung file cũ đè lên file mới. Không đổi thì để yên,
+        # nạp lại vô cớ là nuốt mất phần đang sửa trong bảng.
+        if doi_excel:
+            self.load_excel()
         messagebox.showinfo("Đã lưu", f"Đã lưu cấu hình chiến dịch '{self.cfg['active_campaign']}'.")
 
     # ==================== TAB: NHÓM THEO PHÂN LOẠI ====================
@@ -1293,7 +1330,7 @@ class App(tk.Tk):
         left = ttk.LabelFrame(f, text="Phân loại")
         left.pack(side="left", fill="y", padx=(0, 8), pady=4)
 
-        self.cat_list = tk.Listbox(left, width=24, exportselection=False)
+        self.cat_list = tk.Listbox(left, width=24, height=CAO_CO_GIAN, exportselection=False)
         self.cat_list.pack(fill="y", expand=True, padx=6, pady=6)
         self.cat_list.bind("<<ListboxSelect>>", self.on_select_category)
 
@@ -1317,7 +1354,7 @@ class App(tk.Tk):
             style="Phu.TLabel",
         ).pack(anchor="w", padx=6, pady=(6, 0))
 
-        self.url_box = tk.Text(right, wrap="none", font="TkFixedFont")
+        self.url_box = tk.Text(right, wrap="none", height=CAO_CO_GIAN, font="TkFixedFont")
         self.url_box.pack(fill="both", expand=True, padx=6, pady=6)
 
         ttk.Button(right, text="💾 Lưu danh sách group", command=self.save_groups,
@@ -1329,11 +1366,54 @@ class App(tk.Tk):
         for cat in self.campaign()["groups"]:
             self.cat_list.insert("end", cat)
 
+    def _link_trong_o(self):
+        return [u.strip() for u in self.url_box.get("1.0", "end").split("\n") if u.strip()]
+
+    def _url_box_chua_luu(self):
+        """Ô link group đang có sửa mà chưa bấm 'Lưu danh sách group'."""
+        groups = self.campaign()["groups"]
+        if not self.current_cat or self.current_cat not in groups:
+            return False
+        return self._link_trong_o() != [u.strip() for u in groups[self.current_cat] if u.strip()]
+
+    def bo_qua_thay_doi_chua_luu(self, viec):
+        """Hỏi trước khi `viec` xoá mất phần sửa chưa lưu. True = cứ làm tiếp."""
+        cho = []
+        if self.co_thay_doi_chua_luu():
+            cho.append("tab 'Nội dung bài đăng' (chưa ghi vào Excel)")
+        if self._url_box_chua_luu():
+            cho.append(f"danh sách group của phân loại '{self.current_cat}'")
+        if not cho:
+            return True
+        return messagebox.askyesno(
+            "Có sửa chưa lưu",
+            f"{viec} sẽ bỏ mất phần sửa chưa lưu ở:\n"
+            + "\n".join(f"  • {c}" for c in cho)
+            + "\n\nVẫn tiếp tục?")
+
     def on_select_category(self, _event=None):
         sel = self.cat_list.curselection()
         if not sel:
             return
         cat = self.cat_list.get(sel[0])
+        if cat == self.current_cat:
+            return
+        # Bấm sang phân loại khác là đổ đè ô link — không hỏi thì mấy chục link
+        # vừa dán mất sạch chỉ vì quên bấm Lưu.
+        if self._url_box_chua_luu():
+            hoi = messagebox.askyesnocancel(
+                "Chưa lưu",
+                f"Danh sách group của '{self.current_cat}' có sửa chưa lưu.\n\n"
+                "Yes: lưu rồi chuyển\nNo: bỏ phần sửa\nCancel: ở lại")
+            if hoi is None:
+                ds = self.cat_list.get(0, "end")
+                self.cat_list.selection_clear(0, "end")
+                if self.current_cat in ds:
+                    self.cat_list.selection_set(ds.index(self.current_cat))
+                return
+            if hoi:
+                self.campaign()["groups"][self.current_cat] = self._link_trong_o()
+                cfg_module.save_config(self.cfg)
         self.current_cat = cat
         self.url_box.delete("1.0", "end")
         self.url_box.insert("1.0", "\n".join(self.campaign()["groups"][cat]))
@@ -1363,6 +1443,14 @@ class App(tk.Tk):
         if not new or new == self.current_cat:
             return
         camp = self.campaign()
+        # Trùng tên thì lúc dựng lại dict bên dưới hai khoá đè nhau, một trong
+        # hai phân loại mất sạch link mà không báo gì.
+        if new in camp["groups"]:
+            messagebox.showinfo("Đã có", f"Phân loại '{new}' đã tồn tại.")
+            return
+        # Phần link đang sửa dở trong ô đi theo tên mới, không bị bỏ lại
+        if self._url_box_chua_luu():
+            camp["groups"][self.current_cat] = self._link_trong_o()
         # Dựng lại dict để giữ nguyên thứ tự các phân loại
         camp["groups"] = {
             (new if k == self.current_cat else k): v for k, v in camp["groups"].items()
@@ -1391,7 +1479,7 @@ class App(tk.Tk):
         if not self.current_cat:
             messagebox.showwarning("Chưa chọn", "Hãy chọn một phân loại trước khi lưu.")
             return
-        urls = [u.strip() for u in self.url_box.get("1.0", "end").split("\n") if u.strip()]
+        urls = self._link_trong_o()
         self.campaign()["groups"][self.current_cat] = urls
         cfg_module.save_config(self.cfg)
         messagebox.showinfo("Đã lưu", f"Phân loại '{self.current_cat}': {len(urls)} group.")
@@ -1579,7 +1667,7 @@ class App(tk.Tk):
             self.chk_tu_mo.config(state="disabled")
 
         cot = ("bat", "lich", "camp", "nick", "ke_tiep", "chay_cuoi")
-        self.lich_tree = ttk.Treeview(f, columns=cot, show="headings", height=12)
+        self.lich_tree = ttk.Treeview(f, columns=cot, show="headings", height=CAO_CO_GIAN)
         _ke_soc(self.lich_tree)
         for ma, ten, rong, nho_nhat, gian in (
             ("bat", "Bật", 50, 44, False), ("lich", "Lịch", 220, 140, True),
@@ -1764,6 +1852,12 @@ class App(tk.Tk):
             if not hanh_dong:
                 continue
 
+            # Lịch này lỡ giờ vì lúc đó tool đang bận chứ không phải vì máy
+            # tắt — log đã hứa "chạy ngay khi xong", nên chạy luôn. Hỏi lại thì
+            # lượt chạy lúc 3h sáng đứng chờ một hộp thoại không ai bấm.
+            if hanh_dong == "hoi" and (l["id"], moc) in self.__dict__.get("_da_bao_ban", ()):
+                hanh_dong = "chay"
+
             if hanh_dong == "qua_han":
                 lich_hen.danh_dau_da_xu_ly(l, moc)
                 l["bat"] = False        # chỉ xảy ra với lịch một lần, đã lỡ hẳn
@@ -1810,9 +1904,15 @@ class App(tk.Tk):
             self.refresh_lich()
 
     def _co_hop_thoai_dang_mo(self):
-        """Có cửa sổ con nào (sửa bài, đăng nhập nick, sửa lịch) đang mở không."""
+        """Có cửa sổ con nào (sửa bài, đăng nhập nick, sửa lịch) đang mở không.
+
+        Trừ cửa sổ hướng dẫn: nó cố ý để mở song song với tool, không chặn gì.
+        Tính cả nó vào thì cứ để hướng dẫn mở là mọi lịch hẹn bị hoãn mãi.
+        """
+        hd = getattr(self, "_cua_so_hd", None)
         return any(
-            isinstance(w, tk.Toplevel) and w.winfo_exists() and w.winfo_viewable()
+            isinstance(w, tk.Toplevel) and w is not hd
+            and w.winfo_exists() and w.winfo_viewable()
             for w in self.winfo_children()
         )
 
@@ -1859,11 +1959,11 @@ class App(tk.Tk):
         # cấu hình theo tên chiến dịch từ file, không đọc từ các ô trên màn
         # hình.
         if self.cfg["active_campaign"] != camp_name:
-            if self.co_thay_doi_chua_luu():
+            if self.co_thay_doi_chua_luu() or self._url_box_chua_luu():
                 self.append_log(
                     f"⏰ Vẫn chạy chiến dịch '{camp_name}' theo lịch, nhưng giữ "
-                    "nguyên giao diện vì tab 'Nội dung bài đăng' đang có sửa "
-                    "chưa lưu — nhớ bấm 💾 Ghi vào file Excel.")
+                    "nguyên giao diện vì đang có sửa chưa lưu (bảng bài đăng "
+                    "hoặc danh sách group) — nhớ bấm nút Lưu/Ghi.")
             else:
                 self.cfg["active_campaign"] = camp_name
                 cfg_module.save_config(self.cfg)
@@ -1892,7 +1992,7 @@ class App(tk.Tk):
         left = ttk.LabelFrame(f, text="Nick sẽ đi tham gia nhóm")
         left.pack(side="left", fill="y", padx=(0, 8), pady=4)
 
-        self.join_nick_list = tk.Listbox(left, width=24, exportselection=False)
+        self.join_nick_list = tk.Listbox(left, width=24, height=CAO_CO_GIAN, exportselection=False)
         self.join_nick_list.pack(fill="y", expand=True, padx=6, pady=6)
         self.join_nick_list.bind("<<ListboxSelect>>", lambda _e: self.refresh_join_tree())
 
@@ -1929,7 +2029,7 @@ class App(tk.Tk):
         # 20 nhóm xong quay ra bấm nút thì mất sạch.
         cot = ("chon", "link", "trang_thai", "thoi_gian")
         self.join_tree = ttk.Treeview(khung_ds, columns=cot, show="headings",
-                                      height=9, selectmode="extended")
+                                      height=CAO_CO_GIAN, selectmode="extended")
         _ke_soc(self.join_tree)
         self.join_tree.heading("chon", text="✓", command=self.doi_tick_tat_ca)
         self.join_tree.heading("link", text="Link nhóm")
@@ -1942,9 +2042,13 @@ class App(tk.Tk):
         self.join_tree.bind("<Button-1>", self._bam_vao_bang)
         self.join_tree.bind("<space>", lambda _e: self._doi_tick(self.join_tree.selection()))
         self.join_tree.bind("<Control-c>", lambda _e: self.sao_chep_link())
-        self.join_tree.bind("<Command-c>", lambda _e: self.sao_chep_link())
-        # Chuột phải trên Windows là Button-3, trên Mac có máy ra Button-2
-        for phim in ("<Button-3>", "<Button-2>"):
+        # Phím Command và chuột phải kiểu Button-2 chỉ là của Mac. Trên Windows
+        # Button-2 là bấm con lăn — gắn vào thì bấm con lăn cũng bật menu.
+        phim_chuot_phai = ["<Button-3>"]
+        if sys.platform == "darwin":
+            self.join_tree.bind("<Command-c>", lambda _e: self.sao_chep_link())
+            phim_chuot_phai.append("<Button-2>")
+        for phim in phim_chuot_phai:
             self.join_tree.bind(phim, self._menu_chuot_phai)
 
         self.menu_nhom = tk.Menu(self, tearoff=0)
@@ -2018,7 +2122,7 @@ class App(tk.Tk):
         thanh2.them(ttk.Button(thanh2, text="Xóa màn hình log",
                                command=lambda: self.join_log_box.delete("1.0", "end")), 12)
 
-        self.join_log_box = tk.Text(right, wrap="word", height=10, font="TkFixedFont")
+        self.join_log_box = tk.Text(right, wrap="word", height=CAO_CO_GIAN, font="TkFixedFont")
         _mau_log(self.join_log_box)
         cuon2 = ttk.Scrollbar(right, command=self.join_log_box.yview)
         self.join_log_box.configure(yscrollcommand=cuon2.set)
@@ -2537,12 +2641,8 @@ class App(tk.Tk):
             self._cho_roi_thoat()
             return
 
-        if self.co_thay_doi_chua_luu():
-            if not messagebox.askyesno(
-                "Chưa lưu",
-                "Tab 'Nội dung bài đăng' có thay đổi chưa ghi vào file Excel.\n\n"
-                "Thoát bây giờ sẽ mất phần sửa đó. Vẫn thoát?"):
-                return
+        if not self.bo_qua_thay_doi_chua_luu("Thoát bây giờ"):
+            return
         self.destroy()
 
     def _cho_roi_thoat(self):
@@ -2583,7 +2683,8 @@ class XoaLichSuDang(tk.Toplevel):
 
         khung = ttk.Frame(self)
         khung.pack(fill="both", expand=True, padx=14)
-        self.danh_sach = tk.Listbox(khung, selectmode="extended", font="TkFixedFont")
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", height=CAO_CO_GIAN,
+                                    font="TkFixedFont")
         thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
         self.danh_sach.configure(yscrollcommand=thanh.set)
         thanh.pack(side="right", fill="y")
@@ -2689,7 +2790,8 @@ class QuanLyAnh(tk.Toplevel):
 
         khung = ttk.Frame(self)
         khung.pack(fill="both", expand=True, padx=14)
-        self.danh_sach = tk.Listbox(khung, selectmode="extended", font="TkFixedFont")
+        self.danh_sach = tk.Listbox(khung, selectmode="extended", height=CAO_CO_GIAN,
+                                    font="TkFixedFont")
         thanh = ttk.Scrollbar(khung, command=self.danh_sach.yview)
         self.danh_sach.configure(yscrollcommand=thanh.set)
         thanh.pack(side="right", fill="y")
@@ -3187,11 +3289,12 @@ class LichEditor(tk.Toplevel):
 class RowEditor(tk.Toplevel):
     """Hộp thoại sửa 1 bài đăng: nội dung nhiều dòng, phân loại, thư mục ảnh."""
 
-    def __init__(self, parent, title, row=None, categories=(), goi_y_stt=None):
+    def __init__(self, parent, title, row=None, categories=(), goi_y_stt=None, stt_khac=()):
         super().__init__(parent)
         self.title(title)
         giao_dien.dat_kich_thuoc(self, 720, 560, 560, 420)
         self.result = None
+        self.stt_khac = set(stt_khac)     # STT các bài khác đang dùng
         self.transient(parent)
         self.grab_set()
 
@@ -3209,7 +3312,7 @@ class RowEditor(tk.Toplevel):
         self.bao_cham_cau.pack(side="left", padx=10)
 
         # undo=True để bấm nhầm nút chấm câu còn Ctrl/Cmd+Z lấy lại được
-        self.text = tk.Text(self, wrap="word", height=14, font="TkFixedFont", undo=True)
+        self.text = tk.Text(self, wrap="word", height=CAO_CO_GIAN, font="TkFixedFont", undo=True)
         self.text.pack(fill="both", expand=True, padx=14)
         self.text.insert("1.0", row["noi_dung"])
         self.text.edit_reset()      # nội dung nạp sẵn không tính là một bước undo
@@ -3227,15 +3330,15 @@ class RowEditor(tk.Toplevel):
         self.cat_var = tk.StringVar(value=row["phan_loai"])
         # Combobox cho chọn nhanh nhưng vẫn gõ tay được nếu muốn phân loại mới
         ttk.Combobox(grid, textvariable=self.cat_var, values=list(categories), width=28) \
-            .grid(row=0, column=1, sticky="w", padx=8)
+            .grid(row=1, column=1, sticky="w", padx=8)
         ttk.Label(grid, text="(phải khớp tên nhóm đã khai)", style="Phu.TLabel") \
-            .grid(row=0, column=2, sticky="w")
-
-        ttk.Label(grid, text="Thư mục ảnh:").grid(row=1, column=0, sticky="w", pady=4)
-        self.folder_var = tk.StringVar(value=row["folder"])
-        ttk.Entry(grid, textvariable=self.folder_var, width=30).grid(row=1, column=1, sticky="w", padx=8)
-        ttk.Label(grid, text="(tên thư mục con, để trống nếu không đăng ảnh)", style="Phu.TLabel") \
             .grid(row=1, column=2, sticky="w")
+
+        ttk.Label(grid, text="Thư mục ảnh:").grid(row=2, column=0, sticky="w", pady=4)
+        self.folder_var = tk.StringVar(value=row["folder"])
+        ttk.Entry(grid, textvariable=self.folder_var, width=30).grid(row=2, column=1, sticky="w", padx=8)
+        ttk.Label(grid, text="(tên thư mục con, để trống nếu không đăng ảnh)", style="Phu.TLabel") \
+            .grid(row=2, column=2, sticky="w")
 
         bar = ttk.Frame(self)
         bar.pack(pady=(0, 14))
@@ -3296,6 +3399,14 @@ class RowEditor(tk.Toplevel):
             stt = int(self.stt_var.get().strip())
         except ValueError:
             messagebox.showwarning("STT không hợp lệ", "STT phải là số nguyên.", parent=self)
+            return
+        # Hai bài cùng STT thì file chống trùng coi là một: bài sau bị bỏ qua
+        # với lý do "đã đăng hôm nay" dù chưa từng lên Facebook.
+        if stt in self.stt_khac:
+            messagebox.showwarning(
+                "STT bị trùng",
+                f"STT {stt} đã có bài khác dùng. Mỗi bài phải có STT riêng — "
+                "trùng STT thì bài sau sẽ không bao giờ được đăng.", parent=self)
             return
         # Đổi STT của bài cũ = đổi mã định danh trong posted_log → dễ đăng lại
         if self.stt_goc is not None and stt != self.stt_goc and not messagebox.askyesno(
@@ -3444,4 +3555,19 @@ class ChonMotMuc(tk.Toplevel):
 
 
 if __name__ == "__main__":
-    App().mainloop()
+    try:
+        app = App()
+    except Exception:
+        # Bản .exe/.app không có cửa sổ dòng lệnh: lỗi lúc khởi động (hay gặp
+        # nhất là config.json bị sửa tay hỏng) sẽ làm tool tắt im lặng, người
+        # dùng bấm mở mãi không thấy gì. Dựng một hộp thoại để nói ra.
+        chi_tiet = traceback.format_exc()
+        goc = tk.Tk()
+        goc.withdraw()
+        messagebox.showerror(
+            "Không khởi động được",
+            "Tool gặp lỗi khi khởi động. Nếu vừa sửa tay config.json, hãy kiểm "
+            f"tra lại file đó:\n{cfg_module.CONFIG_PATH}\n\n{chi_tiet[-1500:]}")
+        goc.destroy()
+        raise
+    app.mainloop()
